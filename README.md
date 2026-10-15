@@ -1,454 +1,495 @@
-# Google Maps Local Scraper & Web Dashboard
+# Business Data Scraping & Enrichment Pipeline (`gmaps-scraper`)
 
-A 100% LOCAL, production-grade Google Maps discovery engine, data extractor, and analytical dashboard.
+A local-first, production-grade business data collection, website verification, and intelligence extraction pipeline.
 
-Built from first principles with **zero cloud APIs**, **zero third-party scrapers (no SerpApi, Apify, ScraperAPI)**, **zero API keys**, **zero CDNs**, and **zero external map tiles**. All scraped places, hours, attributes, reviews, and photos reside completely inside your local filesystem and SQLite database.
-
----
-
-## Key Features & Constraints
-
-1. **100% Local Execution**: The server binds exclusively to `127.0.0.1`. No telemetry, no external authentication providers, and zero cloud services.
-2. **Zero CDNs**: All stylesheets, JavaScript, and typography use locally vendored assets and modern system font stacks. Works flawlessly with Wi-Fi disabled.
-3. **Offline Canvas Spatial Map**: The coordinate map is rendered using an HTML5 `<canvas>` coordinate scatter plot with smooth drag-to-pan, scroll-wheel zoom, and clickable place markers. No external tile servers or internet connection required.
-4. **Sub-500ms Server-Side Paginated Table**: Powered by indexed SQLite queries and FTS5 full-text search, keeping query times under 500ms even across 100,000+ rows.
-5. **Keyboard-First Navigation**: Dense, modern dark interface featuring keyboard shortcuts (`j`/`k` row selection, `/` search focus, `Enter` inspect drawer, `Esc` dismiss).
-6. **XSS Proofing**: All user-supplied fields are strictly HTML-escaped across views and detail drawers.
+Built from first principles with **zero external scraping APIs** (no SerpApi, Apify, or ScraperAPI), **zero third-party cloud services**, and **zero mandatory paid dependencies**. The pipeline collects geographic business entities, verifies official company domains with strict SSRF controls, safely crawls public pages, and extracts structured corporate profiles, leadership rosters, and business contact channels directly into a local SQLite repository.
 
 ---
 
-## Directory Structure
+## Table of Contents
+
+- [A. Project Overview](#a-project-overview)
+- [B. Technology Stack](#b-technology-stack)
+- [C. System Architecture](#c-system-architecture)
+- [D. End-to-End Data Flow](#d-end-to-end-data-flow)
+- [E. Module and File Responsibilities](#e-module-and-file-responsibilities)
+- [F. Database Architecture](#f-database-architecture)
+- [G. Website Discovery & Multi-Signal Verification](#g-website-discovery--multi-signal-verification)
+- [H. Website Crawling & Information Extraction](#h-website-crawling--information-extraction)
+- [I. CLI Command Reference](#i-cli-command-reference)
+- [J. Installation & Local Setup](#j-installation--local-setup)
+- [K. Testing & Test Verification](#k-testing--test-verification)
+- [L. Security, Reliability & Limitations](#l-security-reliability--limitations)
+- [M. Implementation Status & Roadmap](#m-implementation-status--roadmap)
+
+---
+
+## A. Project Overview
+
+The `gmaps-scraper` system is designed to build a high-fidelity business intelligence dataset across configured geographic scopes. It operates as a structured multi-stage pipeline:
+
+1. **Local Business Ingestion**: Collects physical places, business metadata, coordinates, categories, and listed websites via local Google Maps endpoints using 4-quadrant adaptive spatial grid tiling.
+2. **Official Website Discovery & Verification**: Identifies candidate web domains for businesses lacking URLs, and verifies existing and discovered domains using multi-signal corroboration (name tokens, title/heading tags, meta descriptions, address/phone corroboration, and directory/social platform rejection).
+3. **Company & Leadership Information Extraction**: Safely traverses same-domain public website pages (e.g. About, Leadership, Team, Services, Locations, Contact) within bounded limits, extracting corporate overviews, service catalogs, operating locations, executive leadership, and business contact channels while storing exact source URLs for every attribute.
+
+### Target Geographic Scope (Pipeline 2)
+The active collection scope is strictly restricted to:
+- **United States (US)**: Exactly 50 individual US States.
+- **Mexico (MX)**: Exactly 32 Federal Entities (31 States + Mexico City `CDMX`, explicitly distinguishing Mexico City from the State of Mexico `MEX`).
+
+All geographic bounds, administrative codes, and task subdivisions are declared in [`config/pipeline2_regions.yaml`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/config/pipeline2_regions.yaml).
+
+### Local-First Architecture
+All data, tasks, logs, checkpoints, full-text indexes, and provenance metadata are persisted locally in SQLite (`data/gmaps.sqlite`). The system requires no third-party cloud database, telemetry agent, or external tracking servers.
+
+---
+
+## B. Technology Stack
+
+The project relies strictly on a verified, minimal local Python stack:
+
+| Component | Technology | Role in Codebase |
+| :--- | :--- | :--- |
+| **Language** | Python 3.10+ (tested on 3.12) | Core execution runtime. |
+| **CLI Framework** | Typer & Rich | Command-line interface, progress bars, formatting, and tables. |
+| **HTTP Engine** | HTTPX (`httpx>=0.27.0`) | Async HTTP client for website verification, crawling, and API requests with redirect interception. |
+| **Database Engine** | SQLite3 (Standard Library) | WAL mode, FTS5 full-text indexing, JSON storage, foreign keys, and transactions. |
+| **Configuration** | PyYAML & Pydantic Settings | Region manifests (`pipeline2_regions.yaml`) and typed runtime configurations. |
+| **HTML Parsing** | Python Standard Library (`re`, `html`, `json`) | Zero-dependency extraction: Schema.org JSON-LD parsing, entity decoding, and text sanitization. |
+| **Network Security** | Python Standard Library (`socket`, `ipaddress`, `urllib.parse`) | Multi-hop SSRF validation, private IP range blocking, loopback prevention, and URL normalization. |
+| **Web UI & API** | FastAPI, Uvicorn, Jinja2 | Local dashboard on `127.0.0.1`, inspection drawers, offline `<canvas>` maps. |
+| **Test Suite** | Pytest (`pytest>=9.0.0`, `pytest-asyncio`) | Unit, integration, and mocked regression testing (100 tests). |
+
+---
+
+## C. System Architecture
+
+The following Mermaid diagram depicts the implemented system architecture, component boundaries, and internal data flow:
+
+```mermaid
+flowchart TD
+    subgraph Config ["1. Scope & Configuration"]
+        YAML["config/pipeline2_regions.yaml\n(50 US States / 32 MX Entities)"]
+        SCOPE["src/gmaps_scraper/scope.py\n(validate_target_country, get_region)"]
+        YAML --> SCOPE
+    end
+
+    subgraph Collection ["2. Google Maps Collection Engine"]
+        CLI_LIVE["CLI: live / search"]
+        TILING["tiling.py\n(Recursive 4-Quadrant Grid)"]
+        SEARCH["search.py & http.py\n(Protobuf/RPC Local Scraper)"]
+        DETAILS["details.py\n(Hours, Attributes, Reviews)"]
+        CLI_LIVE --> TILING --> SEARCH --> DETAILS
+    end
+
+    subgraph Storage ["3. SQLite Database (data/gmaps.sqlite)"]
+        DB["db.py (Database)\n• places\n• collection_tasks\n• company_profiles\n• company_leaders\n• company_contacts"]
+    end
+
+    DETAILS -->|"CID Deduplication & Upsert"| DB
+    SCOPE -->|"Task Progress Tracking"| DB
+
+    subgraph Step2 ["4. Official Website Discovery & Verification (Step 2)"]
+        DISC_SRV["website/service.py\n(WebsiteDiscoveryService)"]
+        DISC["website/discovery.py\n(Candidate URL Discovery)"]
+        SSRF["website/ssrf.py\n(SSRF Guard: IP/DNS/Host checks)"]
+        VERIF["website/verifier.py\n(WebsiteVerifier: Multi-Signal Match)"]
+
+        DB -->|"Select places (website_status IS NULL)"| DISC_SRV
+        DISC_SRV --> DISC
+        DISC --> SSRF
+        DISC_SRV --> VERIF
+        VERIF --> SSRF
+        VERIF -->|"Save verified/candidate & evidence"| DB
+    end
+
+    subgraph Step3 ["5. Safe Crawling & Information Extraction (Step 3)"]
+        ENRICH_SRV["website/enrichment_service.py\n(WebsiteEnrichmentService)"]
+        CRAWLER["website/crawler.py\n(SafeWebsiteCrawler:\nMax 5 pages, same-domain, SSRF-safe)"]
+        EXTRACTOR["website/extractor.py\n(WebsiteExtractor:\nProfile, JSON-LD, Leaders, Contacts)"]
+
+        DB -->|"Select verified businesses (US/MX)"| ENRICH_SRV
+        ENRICH_SRV --> CRAWLER
+        CRAWLER --> SSRF
+        CRAWLER --> EXTRACTOR
+        EXTRACTOR -->|"Save profiles, leaders, contacts, & source URLs"| DB
+    end
+```
+
+---
+
+## D. End-to-End Data Flow
+
+The complete pipeline executes through the following distinct steps:
 
 ```
-gmaps-scraper/
-├── config/
-│   └── default.yaml         # Default scraper parameters and rates
-├── data/
-│   ├── gmaps.sqlite         # SQLite database with WAL and FTS5
-│   └── photos/              # Local photo storage organized by CID
-├── docs/
-│   └── FIELD_MAP.md         # Field mapping documentation & RPC paths
-├── src/
-│   └── gmaps_scraper/
-│       ├── __init__.py
-│       ├── __main__.py      # Module entry point for python -m gmaps_scraper
-│       ├── cli.py           # Typer CLI application
-│       ├── config.py        # Pydantic settings management
-│       ├── db.py            # SQLite schema, queries, quality reports
-│       ├── http.py          # Resilient HTTP client with rate limiting
-│       ├── tiling.py        # 4-quadrant recursive spatial grid tiling
-│       ├── search.py        # Search RPC Protobuf builder and parser
-│       ├── details.py       # Place details extractor (hours, amenities)
-│       ├── reviews.py       # UGC BOQ review pagination extractor
-│       ├── photos.py        # Async photo downloader
-│       ├── export.py        # CSV, JSONL, Parquet exporter
-│       ├── checkpoint.py    # Run state and ETA tracker
-│       └── web/
-│           ├── app.py       # FastAPI application and JSON endpoints
-│           ├── demo_data.py # Sample database seeder
-│           ├── templates/   # Jinja2 templates (dashboard, places, map, runs, quality)
-│           └── static/
-│               ├── css/style.css
-│               └── js/      # Offline canvas charts, canvas map, keyboard controls
-└── tests/                   # Pytest suite with real network fixtures
+[1. Configure Target]  ──> [2. Scope Validation]  ──> [3. Business Collection]
+                                                               │
+[6. URL Verification] <── [5. Website Discovery] <── [4. SQLite Upsert & CID Dedup]
+         │
+         ▼
+[7. Same-Domain Crawl] ──> [8. Information Extract] ──> [9. Provenance Persistence]
 ```
+
+1. **Scope Configuration**: [`config/pipeline2_regions.yaml`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/config/pipeline2_regions.yaml) loads the 50 US States and 32 Mexico Entities with official ISO codes, names, capitals, and status tracking defaults.
+2. **Target Validation**: [`scope.py:validate_target_country()`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/scope.py#L50) and `get_region()` enforce that any requested run strictly targets `US` or `MX` and a valid configured state code.
+3. **Business Search & Collection**: [`tiling.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/tiling.py) subdivides the target bounding box into spatial tiles. For each tile, [`search.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/search.py) queries Google Maps endpoints, parsing raw place records without external browser dependencies.
+4. **CID-Based Deduplication**: [`db.py:upsert_place_stub()`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/db.py#L415) deduplicates records on Google's permanent Customer Identification number (`cid`). Existing valid fields are preserved via `COALESCE`.
+5. **Website Discovery**: For records lacking a website, [`website/discovery.py:WebsiteDiscoverer`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/discovery.py#L12) formulates safe candidate queries. Existing place websites are marked as `existing` candidates.
+6. **Multi-Signal Verification & SSRF Filtering**: [`website/verifier.py:WebsiteVerifier`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/verifier.py#L46) inspects candidates:
+   - Validates every hop against [`website/ssrf.py:is_safe_url()`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/ssrf.py#L45).
+   - Rejects social/directory domains (Facebook, Yelp, Instagram, TripAdvisor).
+   - Verifies ownership score through tokenized business name matching, page titles, H1-H3 headers, and meta descriptions.
+   - Records verification status (`verified`, `needs_review`, `failed`, or `website_missing`) and JSON evidence in `places`.
+7. **Safe Page Crawling**: For verified records, [`website/crawler.py:SafeWebsiteCrawler`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/crawler.py#L29) crawls up to a maximum cap (default: 5 pages per business), strictly restricted to the verified domain, prioritizing `/about`, `/team`, `/leadership`, `/services`, `/locations`, and `/contact`.
+8. **Extraction**: [`website/extractor.py:WebsiteExtractor`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/extractor.py#L38) analyzes crawled HTML and JSON-LD blocks:
+   - Extracts company overview, industry, service lists, locations, and contact-page URL.
+   - Extracts executive leadership (`full_name`, `title`, `role_type`, `biography`, `confidence`) from Schema.org `Person` structures and HTML heading blocks.
+   - Extracts business emails and telephone numbers while filtering out non-text blocks (scripts, styles, SVGs) and invalid placeholders.
+9. **Provenance Persistence**: Extracted records are saved transactionally to `company_profiles`, `company_leaders`, and `company_contacts` in [`src/gmaps_scraper/db.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/db.py#L1593) with exact `source_url` provenance, enforcing unique constraints to guarantee idempotency on re-runs.
 
 ---
 
-## Setup & Installation
+## E. Module and File Responsibilities
 
-Clone or navigate into the project directory:
+| File Path | Main Responsibility | Important Classes / Functions | Input | Output |
+| :--- | :--- | :--- | :--- | :--- |
+| [`src/gmaps_scraper/scope.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/scope.py) | USA/Mexico geographic validation and region manifests. | `get_target_countries()`, `validate_target_country()`, `get_region()` | Country and region code strings | Validated `RegionInfo` dataclass or `ValueError` |
+| [`src/gmaps_scraper/db.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/db.py) | SQLite database management, migrations, queries, and writes. | `Database`, `init_schema()`, `upsert_place_stub()`, `save_company_profile()`, `save_company_leaders()`, `save_company_contacts()` | Place dictionaries, extracted profiles, leadership, contacts | Persisted SQLite rows, foreign keys, and indexes |
+| [`src/gmaps_scraper/cli.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/cli.py) | CLI entry point and commands for operators. | `app`, `scope()`, `website_discover()`, `website_enrich()`, `live()`, `serve()` | CLI flags and options (`--country`, `--region`, `--limit`, `--dry-run`) | Terminal outputs, progress bars, and formatted Rich tables |
+| [`src/gmaps_scraper/http.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/http.py) | Resilient Google Maps HTTP client. | `HttpClient`, `get_with_retry()` | URLs, query parameters, headers | Raw HTTP response bodies with exponential backoff |
+| [`src/gmaps_scraper/search.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/search.py) | Google Maps Search RPC request encoding and response parsing. | `build_search_url()`, `parse_search_response()` | Coordinate bounding box, query | List of raw business dictionaries (name, CID, address, website) |
+| [`src/gmaps_scraper/tiling.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/tiling.py) | 4-quadrant recursive spatial grid decomposition. | `subdivide_tile()`, `Tile` | Geographic bounding boxes | Subdivided coordinate tiles for dense spatial coverage |
+| [`src/gmaps_scraper/website/ssrf.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/ssrf.py) | Network security and SSRF protection. | `is_safe_url()`, `is_private_ip()`, `normalize_url()` | Target candidate or redirect URLs | `(is_safe: bool, reason: Optional[str])` |
+| [`src/gmaps_scraper/website/discovery.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/discovery.py) | Official website candidate identification. | `WebsiteDiscoverer`, `discover_candidate()` | Business dictionary from database | `(candidate_url: Optional[str], method: str)` |
+| [`src/gmaps_scraper/website/verifier.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/verifier.py) | Multi-signal domain verification. | `WebsiteVerifier`, `verify()` | Candidate URL and business metadata | Verification status dict with score and JSON evidence |
+| [`src/gmaps_scraper/website/crawler.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/crawler.py) | Bounded, same-domain safe website crawler. | `SafeWebsiteCrawler`, `crawl()` | Verified root URL, max page cap | Dict mapping `{page_url: PageResponse}` |
+| [`src/gmaps_scraper/website/extractor.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/extractor.py) | Information and leadership extraction from HTML. | `WebsiteExtractor`, `extract()` | Business record and crawled pages dict | Dict with profile, leadership, contacts, and source URLs |
+| [`src/gmaps_scraper/website/service.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/service.py) | Step 2 Website Discovery orchestration. | `WebsiteDiscoveryService`, `run_discovery()` | Target country/region, limit, dry-run | Summary statistics and updated place records |
+| [`src/gmaps_scraper/website/enrichment_service.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/enrichment_service.py) | Step 3 Website Information Extraction orchestration. | `WebsiteEnrichmentService`, `run_enrichment()` | Target country/region, limit, max pages, dry-run | Extracted company intelligence and summary metrics |
+
+---
+
+## F. Database Architecture
+
+The primary database is located at [`data/gmaps.sqlite`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/data/gmaps.sqlite). The database operates in SQLite WAL mode (`PRAGMA journal_mode=WAL`) with foreign key enforcement enabled (`PRAGMA foreign_keys=ON`).
+
+### Entity-Relationship Diagram
+
+```mermaid
+erDiagram
+    places ||--o{ collection_tasks : "tracks task progress"
+    places ||--o| company_profiles : "has profile (1:1)"
+    places ||--o{ company_leaders : "has leaders (1:N)"
+    places ||--o{ company_contacts : "has contacts (1:N)"
+
+    places {
+        TEXT cid PK "Google Maps permanent CID"
+        TEXT name "Business name"
+        TEXT address "Physical address"
+        TEXT website "Listed website URL"
+        TEXT phone "Listed phone number"
+        TEXT country_code "Target country (US or MX)"
+        TEXT region "State or entity code"
+        TEXT website_status "verified | needs_review | failed | website_missing"
+        TEXT website_candidate "Candidate URL evaluated"
+        TEXT website_evidence "JSON verification score & signals"
+        TEXT official_website_url "Final verified website URL"
+        TEXT enrichment_status "completed | partial | failed"
+        TIMESTAMP enrichment_last_checked "Last crawl timestamp"
+    }
+
+    collection_tasks {
+        TEXT task_id PK "UUID task identifier"
+        TEXT country_code "US or MX"
+        TEXT region_code "State or Entity code"
+        TEXT status "pending | in_progress | completed | failed"
+        INTEGER total_places_found "Total entities collected"
+        TIMESTAMP completed_at "Task completion time"
+    }
+
+    company_profiles {
+        TEXT cid PK, FK "References places(cid)"
+        TEXT overview "Company overview / meta description"
+        TEXT industry "Business category or industry"
+        TEXT services_json "JSON array of products/services"
+        TEXT locations_json "JSON array of physical operating locations"
+        TEXT contact_page_url "URL of dedicated contact page"
+        TEXT source_pages_json "JSON array of crawled page URLs"
+        TEXT extraction_status "completed | partial | failed"
+        TIMESTAMP last_extracted "Extraction timestamp"
+        TEXT last_error "Error message if extraction failed"
+    }
+
+    company_leaders {
+        INTEGER id PK "Auto-increment primary key"
+        TEXT cid FK "References places(cid)"
+        TEXT full_name "Executive full name"
+        TEXT title "Published job title"
+        TEXT role_type "CEO | CTO | CFO | COO | President | Founder | Owner | Director | VP"
+        TEXT biography "Short bio snippet if available"
+        TEXT source_url "Page URL where leader was published"
+        REAL confidence "Confidence score (0.0 to 1.0)"
+    }
+
+    company_contacts {
+        INTEGER id PK "Auto-increment primary key"
+        TEXT cid FK "References places(cid)"
+        TEXT contact_type "email | phone | url"
+        TEXT contact_value "Normalized email or phone value"
+        TEXT label "general | executive | office"
+        TEXT source_url "Page URL where contact was discovered"
+    }
+```
+
+### Table Details & Schema Integrity
+
+1. **`places` Table**: Stores the core business identity. `cid` serves as the primary key. Schema migrations in `db.py:init_schema()` idempotently add Pipeline 2 columns (`website_status`, `website_candidate`, `website_evidence`, `official_website_url`, `enrichment_status`) using `ALTER TABLE places ADD COLUMN ...` only when columns are missing.
+2. **`collection_tasks` Table**: Manages collection job states per state/region, tracking progress, attempts, errors, and task completion.
+3. **`company_profiles` Table**: Normalized 1-to-1 extension of `places`. Stores rich text overview, extracted service catalogs, physical operating branches, and the complete audit list of source pages traversed during the crawl.
+4. **`company_leaders` Table**: Stores executive and management team members. Features a `UNIQUE(cid, full_name, title)` composite constraint, guaranteeing that repeated runs never create duplicate leadership rows.
+5. **`company_contacts` Table**: Stores published corporate emails and telephone channels with a `UNIQUE(cid, contact_type, contact_value)` constraint to ensure idempotency.
+6. **Provenance & Auditability**: Every row in `company_leaders` and `company_contacts` explicitly records the `source_url` where the record was discovered.
+
+---
+
+## G. Website Discovery & Multi-Signal Verification
+
+An HTTP `200 OK` status code does **not** prove that a website officially belongs to a business. The verification engine implemented in [`src/gmaps_scraper/website/verifier.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/verifier.py) prevents misattribution through multi-signal evidence.
+
+### Verification Workflow
+1. **Candidate Ingestion**: Existing URLs in the Google Maps place record are tested first (`discovery_method="existing"`). If missing, candidate search queries generate candidate domains.
+2. **Directory & Social Platform Rejection**: Targets matching known third-party directory or social networks (Facebook, Instagram, Yelp, YellowPages, TripAdvisor, TikTok, LinkedIn) are classified as `needs_review` and are never verified as official company sites.
+3. **SSRF Guard on Initial Hop and All Redirects**: [`website/ssrf.py:is_safe_url()`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/ssrf.py#L45) inspects the host and resolved IP addresses against:
+   - Loopback addresses (`127.0.0.0/8`, `::1`).
+   - Private RFC1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+   - Link-local and cloud metadata destinations (`169.254.169.254`, `fe80::/10`).
+   - Disallowed protocols (only `http` and `https` permitted).
+   - Any redirect to an unsafe destination terminates verification with an SSRF error.
+4. **Multi-Signal Score Calculation**:
+   - **Domain Stem Matching**: Extracts the domain root (e.g. `cafegrumpy` from `www.cafegrumpy.com`) and matches against business name tokens.
+   - **Page Title & Heading Alignment**: Matches tokenized business name against `<title>` and `<h1>`–`<h3>` tags.
+   - **Meta Description Corroboration**: Checks for presence of business name in `<meta name="description">` and `og:description`.
+   - **Contact / Phone Corroboration**: Checks if the place's known telephone digits appear on the candidate page.
+5. **Status Assignment**:
+   - Total score $\ge 70$: `status="verified"`
+   - Total score between $40$ and $69$: `status="needs_review"`
+   - Score $< 40$, connection failure, or HTTP error: `status="failed"`
+
+---
+
+## H. Website Crawling & Information Extraction
+
+Once a website is verified, [`src/gmaps_scraper/website/crawler.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/crawler.py) and [`extractor.py`](file:///r:/Roshan%20Onedata/Gmap%20scarp/gmaps-scraper/src/gmaps_scraper/website/extractor.py) extract information within safe parameters.
+
+### Crawler Controls & Safety
+- **Maximum Pages Cap**: Defaults to 5 pages per business to prevent crawler traps, deep pagination loops, and site overload.
+- **Strict Same-Domain Boundary**: Subdomains and external links are strictly excluded (e.g. crawling `company.com` will not follow links to `partner.com` or third-party web apps).
+- **Asset Filtering**: Ignores binary and non-HTML extensions (`.png`, `.jpg`, `.pdf`, `.zip`, `.mp4`, `.css`, `.js`, `.woff`).
+- **Priority Queue**: Crawls the homepage first, parses internal links, and prioritizes paths containing:
+  `about`, `team`, `leadership`, `executive`, `management`, `services`, `products`, `locations`, `contact`.
+
+### Structured Extraction Techniques
+- **Company Overview**: Extracted from Schema.org `description`, `<meta name="description">`, `og:description`, or the primary lead paragraph of an About page.
+- **Services & Offerings**: Parsed from unordered lists (`<li>`) within dedicated service, menu, or offering sections.
+- **Operating Locations**: Extracted from Schema.org `PostalAddress` blocks, `<address>` tags, and contact-page location blocks.
+- **Public Leadership**:
+  - **JSON-LD Schema**: Evaluates `<script type="application/ld+json">` for entities of type `Person` with `jobTitle` or `hasOccupation`.
+  - **HTML Structure**: Matches heading patterns (e.g. `<h3>Jane Doe</h3><p class="title">Chief Executive Officer</p>`) and standard executive delimiters (`Name – Title`).
+  - **Role Classification**: Normalizes titles into executive roles (`CEO`, `CTO`, `CFO`, `COO`, `President`, `Founder`, `Owner`, `Director`, `VP`).
+  - **Negative Name Filter**: Rejects navigational artifacts (`About Us`, `Our Team`, `Leadership Team`, `Read Bio`, `Privacy Policy`).
+  - **Zero Fabrication**: If leadership information is absent, the system records zero leaders without guessing or fabricating identities.
+- **Business Contacts**:
+  - Raw HTML is parsed for `<a href="mailto:...">` and `<a href="tel:...">`.
+  - Scripts (`<script>`), stylesheets (`<style>`), and vector graphics (`<svg>`) are stripped before body text regex scanning to prevent false-positive matches on asset hashes, script variables, and coordinates.
+  - Emails ending in asset extensions (`logo@2x.png`) or containing placeholder domains (`example.com`, `sentry.io`, `schema.org`) are rejected.
+  - Distinguishes general business inboxes (`info@`, `contact@`, `hello@`, `support@`) from personal/executive emails.
+
+---
+
+## I. CLI Command Reference
+
+All commands are executed via the Typer CLI entry point: `python -m gmaps_scraper <command>`.
+
+### 1. Inspect Geographic Scope
+Inspect configured Pipeline 2 target countries and states without modifying the database.
 
 ```powershell
-cd "gmaps-scraper"
+# Show summary of configured entities (50 US States, 32 Mexico Entities)
+python -m gmaps_scraper scope --summary
+
+# Inspect all US states with live database completion metrics
+python -m gmaps_scraper scope --country US
+
+# Inspect a single state/entity
+python -m gmaps_scraper scope --country US --region NY
+python -m gmaps_scraper scope --country MX --region JAL
 ```
 
-Install requirements into your Python environment (Python 3.10+):
+### 2. Live Google Maps Collection
+Run a targeted local search job using adaptive tiling.
 
 ```powershell
-pip install -r requirements.txt
-pip install -e .
+# Collect up to 10 places in a specific city with live terminal streaming
+python -m gmaps_scraper live --query "coffee" --location "Cheyenne, WY" --max-places 10 --follow
+
+# Check live scrape job status
+python -m gmaps_scraper jobs --limit 5
 ```
 
----
-
-## Launching the Local Web Dashboard
-
-### Instant Demo Mode (Populated with Sample Data)
-If starting on a clean machine or empty database, pass `--demo` to seed sample records immediately:
+### 3. Official Website Discovery & Verification (Step 2)
+Discover and verify official company websites for stored business records.
 
 ```powershell
-python -m gmaps_scraper serve --port 8765 --demo
+# Dry-run: Evaluate website candidates for up to 5 businesses without writing to SQLite
+python -m gmaps_scraper website-discover --country US --region WY --limit 5 --dry-run
+
+# Run discovery and record verified websites with evidence into SQLite
+python -m gmaps_scraper website-discover --country US --region WY --limit 5
+
+# Retry previously failed or review-needed discovery tasks
+python -m gmaps_scraper website-discover --country US --region WY --limit 5 --retry-failed
 ```
 
-### Standard Local Server
+### 4. Website Information & Leadership Extraction (Step 3)
+Extract company profiles, leadership rosters, and business contacts from verified websites.
+
+```powershell
+# Dry-run: Crawl and extract from verified websites without writing to SQLite
+python -m gmaps_scraper website-enrich --country US --region NY --limit 4 --dry-run
+
+# Run live enrichment: crawl pages and persist profiles, leaders, contacts, and source URLs
+python -m gmaps_scraper website-enrich --country US --region NY --limit 4 --max-pages 5
+
+# Retry previously failed enrichment tasks
+python -m gmaps_scraper website-enrich --country US --region NY --limit 5 --retry-failed
+
+# Force re-enrichment of already completed records
+python -m gmaps_scraper website-enrich --country US --region NY --limit 2 --force
+```
+
+### 5. Local Web Dashboard
+Launch the zero-CDN local web dashboard and places explorer on `127.0.0.1`.
+
 ```powershell
 python -m gmaps_scraper serve --port 8765
 ```
 
-Navigate to [http://127.0.0.1:8765](http://127.0.0.1:8765) in any browser.
-
 ---
 
-## Web Dashboard Views
+## J. Installation & Local Setup
 
-| Route | View | Description |
-|---|---|---|
-| `/` | **Dashboard** | KPI cards (total, enriched, reviews, photos, failed, last run), rating distribution histogram (`<canvas>`), top-20 categories chart, and pipeline status counters. |
-| `/places` | **Places Explorer** | Server-side paginated table with full-text search (`name`, `address`, `phone`, `website`). Filters for status, category, min rating, min reviews, phone/website presence, local photos, and claimed status. Click any row or press `Enter` to slide out the detail drawer. Includes an **Export Current Filter** button. |
-| `/places/{cid}` | **Place Details** | Complete field inspection: hours table, attributes & features, hourly popular-times chart, paginated customer reviews, and local photos served from disk. |
-| `/map` | **Coordinate Map** | 100% offline HTML5 Canvas scatter plot displaying places by latitude/longitude. Drag to pan, scroll to zoom, click pins to inspect in drawer. Optional online OpenStreetMap toggle clearly isolated. |
-| `/runs` | **Runs & Logs** | Trigger discovery, enrichment, reviews, photos, or full pipeline directly from the UI. Displays active step progress, counters, ETA estimation, and live streaming log tail. |
-| `/quality` | **Quality Audit** | Automated data hygiene audit displaying per-column null counts, duplicate detection (by CID and by name + address collisions), coordinate anomalies (e.g. `(0,0)` outliers), failed records, and a one-click **Retry Failed** button. |
+### System Requirements
+- **Python**: Version 3.10 or higher (fully tested on Python 3.12).
+- **Operating System**: Windows (PowerShell), Linux, or macOS.
+- **Disk Space**: ~25 MB for code and dependencies; SQLite database size scales with collected places.
 
----
+### Setup Steps (Windows PowerShell)
 
-## Keyboard Shortcuts
-
-The dashboard is designed for rapid, mouse-free data curation:
-
-- <kbd>/</kbd> — Focus the global search bar
-- <kbd>j</kbd> — Move selection down one row in the places table
-- <kbd>k</kbd> — Move selection up one row in the places table
-- <kbd>Enter</kbd> — Open the slide-in detail drawer for the selected place
-- <kbd>Esc</kbd> — Close the detail drawer or clear focus
-
----
-
-## JSON API Reference
-
-All backend functionality is available programmatically via local JSON endpoints under `/api`:
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/stats` | Aggregated dataset metrics, rating distribution, and top categories |
-| `GET` | `/api/places` | Paginated places search with query, filter, and sorting parameters |
-| `GET` | `/api/places/{cid}` | Complete structured place details including hours and attributes |
-| `GET` | `/api/places/{cid}/reviews` | Paginated reviews with author, rating, text, and owner response |
-| `GET` | `/api/places/{cid}/photos` | Local photo records for a given place |
-| `GET` | `/api/map` | Compact coordinates `[{cid, lat, lng, name, rating, category}]` for canvas rendering |
-| `GET` | `/api/progress` | Current pipeline execution state, counters, and ETA |
-| `GET` | `/api/logs?tail=200` | Tail of the local execution log file |
-| `POST` | `/api/run/{action}` | Trigger pipeline actions (`search`, `enrich`, `reviews`, `photos`, `export`, `full`) |
-| `POST` | `/api/resume` | Resume incomplete tasks from previous runs |
-| `POST` | `/api/retry-failed` | Reset failed places (`status = 'failed'`) to `pending` status |
-| `GET` | `/api/export?format=csv` | Filtered export in CSV or JSONL format (byte-identical to CLI export) |
-| `GET` | `/media/photos/{cid}/{file}` | Clean local image serving directly from disk with proper MIME types |
-
----
-
-## CLI Commands
-
-You can run individual pipeline stages or the full end-to-end pipeline directly from the command line:
-
-```powershell
-# 1. Initialize SQLite schema and directories (7 tables + FTS5 index)
-python -m gmaps_scraper init
-
-# 2. Search discovery tile grid with recursive subdivision
-python -m gmaps_scraper search --query "coffee" --bbox "40.7128,-74.0060,0.01"
-
-# 3. Enrich places with hours, attributes, popular times, and photos
-python -m gmaps_scraper enrich --limit 50
-
-# 4. Fetch customer reviews (BOQ pagination loop)
-python -m gmaps_scraper reviews --max-per-place 50 --limit-places 50
-
-# 5. Download photos to local disk (organizes into data/photos/{cid}/ with manifests)
-python -m gmaps_scraper photos --limit 20
-
-# 6. Export data to files (csv, jsonl, or parquet)
-python -m gmaps_scraper export --format csv
-python -m gmaps_scraper export --format jsonl
-python -m gmaps_scraper export --format parquet
-
-# 7. Print local database statistics, status breakdown, and last run
-python -m gmaps_scraper stats
-
-# 8. Resume incomplete tasks after interruption
-python -m gmaps_scraper resume
-
-# 9. Full end-to-end pipeline in one command
-python -m gmaps_scraper run --query "coffee" --bbox "40.7128,-74.0060,0.01" --max-reviews 50
-
-# 10. Start 100% local web dashboard on 127.0.0.1
-python -m gmaps_scraper serve --port 8765 --demo
-```
-
----
-
-## Configuration Reference (`config/default.yaml` & `config/user.yaml`)
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `concurrency` | int | `4` | Max concurrent async workers |
-| `per_host_rate` | float | `2.0` | Requests per second limit per host |
-| `max_retries` | int | `4` | Retry attempts on 429/5xx before failing |
-| `backoff_base` | float | `2.0` | Exponential backoff multiplier base |
-| `tile_base_zoom` | int | `15` | Default spatial zoom level |
-| `tile_max_depth` | int | `3` | Maximum recursive tile subdivision depth |
-| `tile_overlap_pct`| float | `0.1` | Fractional quadrant boundary overlap |
-| `max_reviews_per_place` | int | `100` | Max customer reviews to paginate per place |
-| `download_photos` | bool | `true` | Whether to download images locally to disk |
-| `photo_max_width` | int | `1200` | Max width parameter for downloaded photos |
-| `user_agent` | str | *(Chrome 122)* | Realistic User-Agent header string |
-| `accept_language` | str | `en-US,en;q=0.9` | Accept-Language header string |
-| `hl` | str | `en` | Google Maps host language code |
-| `gl` | str | `us` | Google Maps geographic region code |
-| `proxies` | list | `[]` | Optional list of HTTP/SOCKS5 proxies for rotation |
-| `headless_fallback` | bool | `false` | Enable Playwright fallback for tricky challenges |
-
----
-
----
-
-## Business Vertical Taxonomy & Country Lookup
-
-### 1. Vertical Taxonomy (`config/verticals.yaml`)
-Normalizes raw Google categories into high-level business verticals using case-insensitive keyword matching with ordered evaluation (first match wins):
-
-- `healthcare`: hospital, clinic, medical, doctor, physician, urgent care, dentist, dental, pharmacy, optometrist, chiropractor, physical therapy, diagnostic, laboratory, health
-- `hospitality`: hotel, motel, hostel, resort, guest house, bed and breakfast
-- `food`: restaurant, cafe, coffee, bakery, bar, pub, pizza, fast food, deli, diner, ice cream, food court, juice, tea house
-- `retail`: store, shop, boutique, supermarket, grocery, convenience, mall, market, pharmacy retail, clothing, electronics
-- `fitness`: gym, fitness, yoga, pilates, crossfit, sports centre, swimming
-- `beauty`: salon, barber, spa, nail, hair, tattoo, beauty
-- `automotive`: car repair, auto, garage, petrol, gas station, car wash, dealership
-- `finance`: bank, atm, credit union, insurance, financial
-- `education`: school, college, university, kindergarten, academy, tuition, library
-- `government`: government, city hall, post office, embassy, courthouse, police, fire station
-- `real_estate`: real estate, property, estate agent
-- `other`: fallback when no keywords match
-
-#### How to Extend Taxonomy
-Edit `config/verticals.yaml`. Add a new vertical key with `label` and `keywords` list. Then run:
-```powershell
-python -m gmaps_scraper reclassify
-```
-All existing records are reclassified idempotently against the updated taxonomy.
-
-### 2. Local Country Resolution (`config/countries.yaml`)
-Resolves addresses strictly locally with zero external network or geocoding API calls.
-The last comma-separated address component is stripped of postal codes and matched against `config/countries.yaml` (supporting ISO 3166-1 alpha-2 codes and comprehensive aliases). If unresolvable, sets `country = "unknown"`, `country_code = "unknown"` without guessing.
-
----
-
-## CLI Commands
-
-| Command | Usage | Description |
-|---|---|---|
-| `init` | `python -m gmaps_scraper init` | Initializes directories, SQLite tables, triggers, and runs idempotent migrations. |
-| `reclassify` | `python -m gmaps_scraper reclassify` | Re-derives `vertical`, `country`, `city`, `region`, `postal_code` for all existing rows idempotently. |
-| `search` | `python -m gmaps_scraper search -q "coffee" -b "40.70,-74.02,0.02"` | Recursive quadtree tiling discovery and place stub collection. |
-| `enrich` | `python -m gmaps_scraper enrich -l 100` | Details enrichment: operating hours, attributes, popular times. |
-| `reviews` | `python -m gmaps_scraper reviews --max-per-place 50` | BOQ review pagination. |
-| `photos` | `python -m gmaps_scraper photos -l 50` | Downloads photo files to disk with magic byte verification. |
-| `export` | `python -m gmaps_scraper export -f csv [--full]` | Exports data to CSV/JSONL/Parquet. `--full` emits all 29 schema columns. |
-| `serve` | `python -m gmaps_scraper serve --port 8765 [--demo]` | Launches local FastAPI web dashboard on `127.0.0.1`. |
-
----
-
-## API Endpoints
-
-### List & Filtering Endpoints (Support all composable filter params)
-Filter parameters supported across `/api/places`, `/api/map`, `/api/export`, and HTML `/places`:
-- `vertical` (repeatable / comma-separated list, e.g. `?vertical=healthcare,food`)
-- `country` (repeatable / comma-separated list, accepts ISO alpha-2 or country name)
-- `city` (repeatable / comma-separated list)
-- `min_rating` (float, e.g. `4.0`)
-- `min_reviews` (int, e.g. `50`)
-- `has_phone`, `has_website`, `has_photos`, `claimed` (bool)
-- `has_reviews`, `has_hours`, `has_attributes` (bool)
-
-### New Analytical Endpoints
-- `GET /api/verticals`: Live facet counts for business verticals respecting other active filters (`[{key, label, count}]`).
-- `GET /api/countries`: Live facet counts for countries respecting other active filters (`[{code, name, count}]`).
-- `GET /api/cities?country=`: Live facet counts for cities in the selected country (`[{city, count}]`).
-- `GET /api/places/{cid}/full`: Complete JSON document containing every column of `places` plus `hours`, `attributes`, `reviews`, `photos`, and `popular_times`.
-- `GET /api/export?format=csv|jsonl|parquet&full=true`: Full data export emitting all 29 schema columns.
-
----
-
-## Output Schema
-
-### 1. `places` (29 Columns)
-- `cid`: Unique 64-bit Customer ID string (Primary Key)
-- `ftid`: Feature ID string
-- `place_id`: Google Place ID string
-- `name`: Business / establishment name
-- `address`: Clean street address
-- `street_address`: Street name and number
-- `latitude`, `longitude`: Decimal WGS-84 coordinates
-- `website`: Official website URL
-- `phone`, `phone_e164`: Local and E.164 phone formats
-- `category`: Primary Google business category
-- `vertical`: Normalized business vertical (e.g. `healthcare`, `food`, `retail`)
-- `vertical_raw`: Original Google primary category, untouched
-- `country`: Full country name (e.g. `United States`)
-- `country_code`: ISO-3166 alpha-2 country code (e.g. `US`)
-- `region`: State / province abbreviation or name (e.g. `NY`)
-- `city`: City / locality name (e.g. `New York`)
-- `postal_code`: Extracted postal / zip code (e.g. `10004`)
-- `rating`: Float rating in [1.0, 5.0]
-- `review_count`: Total advertised reviews count
-- `timezone`: Local IANA timezone identifier
-- `claimed_status`: 1 if verified owner, 0 if unclaimed
-- `photo_thumbnail`: Primary photo thumbnail URL
-- `status`: Enum: `pending`, `details_done`, `reviews_done`, `complete`, `failed`
-- `attempts`: Processing attempt counter
-- `error`: Last processing error description
-- `created_at`: Initial discovery timestamp
-- `updated_at`: Last update timestamp
-
-### 2. Lookup Tables
-- `verticals`: `(key TEXT PRIMARY KEY, label TEXT)`
-- `countries`: `(code TEXT PRIMARY KEY, name TEXT)`
-
-### 3. `hours`
-- `cid`: Foreign key to `places.cid`
-- `day`: Day index (1 = Monday .. 7 = Sunday)
-- `day_name`: Day name string
-- `formatted_text`: Opening hours string
-- `is_closed`: 1 if closed, 0 if open
-
-### 4. `attributes`
-- `cid`: Foreign key to `places.cid`
-- `group_id`, `group_name`: Attribute category (e.g. `Accessibility`, `Amenities`)
-- `attribute_id`, `attribute_name`: Specific amenity tag
-- `is_enabled`: 1 if available, 0 if not
-- `display_value`: Formatted display text
-
-### 5. `reviews`
-- `cid`: Foreign key to `places.cid`
-- `review_id`: Unique review ID
-- `author_name`: Reviewer name
-- `author_id`, `author_avatar_url`, `author_profile_url`: Author metadata
-- `rating`: Integer star rating (1-5)
-- `relative_date`: String relative age
-- `timestamp_ms`: Epoch millisecond timestamp
-- `text`: Review text body
-- `owner_response_text`, `owner_response_date`: Business owner reply
-- `reaction_count`: Helpful vote count
-- `photos_json`: Attached review photo URLs
-
-### 6. `photos`
-- `cid`: Foreign key to `places.cid`
-- `review_id`: Associated review ID (if reviewer photo)
-- `photo_url`: Google CDN photo URL
-- `local_path`: Relative disk path under `data/photos/{cid}/`
-- `file_size`: File size in bytes
-- `attribution`: Photographer or owner credit
-
----
-
-## Troubleshooting
-
-### 1. Consent Redirect (`CONSENT=YES+` / `SOCS`)
-- **Symptom**: Requests redirect to `consent.google.com` or return 302.
-- **Fix**: The client automatically injects `Cookie: CONSENT=YES+; SOCS=...` in request headers. When Google issues updated Set-Cookie consent headers, the client re-establishes and persists them across the session.
-
-### 2. HTTP 429 Too Many Requests
-- **Symptom**: Google responds with HTTP status 429.
-- **Fix**: The client incorporates exponential backoff with random jitter (`(backoff_base ** attempts) + uniform(0.5, 1.5)`). You can also lower `concurrency` or reduce `per_host_rate` in `config/default.yaml`.
-
-### 3. Empty Parse / Schema Shift
-- **Symptom**: Search results return zero parsed places.
-- **Fix**: The parser automatically activates a dual-tier strategy: RPC protobuf parsing first; if empty, it activates the balanced-bracket scanner for `window.APP_INITIALIZATION_STATE` HTML fallback. If Google alters sub-array indexes, `FIELD_MAP.md` documents the exact paths and named exceptions pinpoint missing arrays.
-
----
-
-## Legal & Ethical Note
-
-This scraper is intended solely for personal data analysis, local archiving, and research purposes. Please scrape responsibly: respect per-host rate limits, avoid abusive request bursts, and adhere to local privacy and copyright laws regarding scraped content.
-
----
-
-## Offline Verification Step (Zero-CDN Guarantee)
-
-To verify that the application functions 100% offline without external dependencies:
-
-1. Launch the server:
+1. Clone or navigate to the repository:
    ```powershell
-   python -m gmaps_scraper serve --port 8765 --demo
+   cd "r:\Roshan Onedata\Gmap scarp\gmaps-scraper"
    ```
-2. **Disconnect your machine from the internet** (turn off Wi-Fi or unplug ethernet).
-3. Open your browser and navigate to `http://127.0.0.1:8765`.
-4. Open Developer Tools (<kbd>F12</kbd>) and check the **Network** tab.
-5. Refresh the page and browse across all views (`/`, `/places`, `/places/{cid}`, `/map`, `/runs`, `/quality`).
-6. **Result**: All assets (`style.css`, `canvas_charts.js`, `canvas_map.js`, `app.js`) load locally from `127.0.0.1`. No external domain requests (Google Fonts, Cloudflare, unpkg, cdnjs, etc.) are initiated. All charts and the coordinate map render locally on `<canvas>`.
+
+2. Create and activate a local virtual environment:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+3. Install project dependencies in editable mode:
+   ```powershell
+   pip install --upgrade pip
+   pip install -e .
+   ```
+
+4. Initialize the database schema:
+   ```powershell
+   python -c "from gmaps_scraper.db import Database; db = Database('data/gmaps.sqlite'); db.init_schema()"
+   ```
+
+5. Confirm CLI availability:
+   ```powershell
+   python -m gmaps_scraper --help
+   ```
 
 ---
 
----
+## K. Testing & Test Verification
 
-## On-Demand Live Search & Scraper (`/live`)
+The repository contains an automated regression and unit test suite powered by `pytest`. Unit tests use local fixtures and mocked HTTP responses (`AsyncMock` / `httpx.Response`), ensuring test runs are deterministic and require no live Google Maps requests or external website connections.
 
-The system includes a 100% local, on-demand live search engine that lets you type any business type and any location, resolves geographic boundaries without cloud geocoders, streams places directly into your browser via Server-Sent Events (SSE) as they are scraped from Google Maps, and stores everything in the local SQLite database.
-
-### 1. Zero-API-Key Location Resolver (`src/gmaps_scraper/geo/resolve.py`)
-> [!IMPORTANT]
-> Location resolution **never uses the Google Geocoding API** or cloud keys. It reuses the exact same internal Google Maps search RPC already employed for scraping, with automatic fallback:
-> 1. **Primary**: Protobuf search RPC (`!1d50000...q=<location>`), extracting top entity coordinates and decoded protobuf classification tokens (`p[209]`).
-> 2. **Fallback**: `https://www.google.com/maps/place/<location>` reading `window.APP_INITIALIZATION_STATE` coordinates.
-> 3. **Manual**: Prompts for coordinate input (`lat,lng@radius`).
-
-Features are classified locally to derive default bounding box spans from `config/geo_spans.yaml`:
-- **Country**: `2.0°` span
-- **State / Region**: `0.5°` span
-- **City / Metro**: `0.10°` span (~11 km)
-- **District / Borough / Area**: `0.03°` span (~3.3 km)
-- **Street / Address**: `0.005°` span (~500 m)
-
-All resolutions are cached locally in the `geo_cache` table.
-
-### 2. Natural Language Parse (`nlparse.py`)
-Enables single-input queries like `"hospitals in Chicago"`, `"bakeries in Lyon, France"`, or `"gyms near 40.75,-73.98"`.
-- Splits on the **last** occurrence of `" in "`, `" near "`, `" around "`, `" at "`, `" within "`.
-- Cleans `"in the..."` and extracts relative locations.
-- Never auto-executes: pre-fills the "What" and "Where" form fields for explicit user confirmation.
-
-### 3. Persistent Job Engine & State Machine (`jobs.py`)
-A background worker executes jobs sequentially from a FIFO queue:
-`queued` &rarr; `resolving` &rarr; `discovering` &rarr; `enriching` &rarr; `reviews` &rarr; `photos` &rarr; `done` (or `cancelled` / `failed`).
-- **Deduplication**: Globally dedupes places against existing CIDs in SQLite. Existing places with `reviews_done` or `complete` are skipped unless `force_refresh=true`.
-- **Cooperative Cancellation**: Checkpoints flags between every tile, review page, and photo. On cancel, flushes partial records and marks status as `cancelled`.
-- **Restart Resilience**: If the server process restarts mid-job, pending/active jobs are marked `interrupted` and can be resumed via `/api/live/retry/{id}`.
-
-### 4. Streaming API & Guardrails
-- `POST /api/live/parse` &rarr; Natural language parse
-- `POST /api/live/resolve` &rarr; Resolves location with pre-flight tile & request estimates
-- `POST /api/live/start` &rarr; Creates and enqueues job (refuses requests >5,000 without explicit user confirmation)
-- `GET /api/live/stream?job_id=` &rarr; Real-time SSE stream (`stage`, `progress`, `place`, `error`, `done`) with 15-second heartbeat comments (`: ping\n\n`) and max 10 concurrent connections. Client disconnection does not abort the scrape job.
-- `GET /api/live/job/{id}` &rarr; Job summary and event log history
-- `GET /api/live/jobs` &rarr; Recent job history
-- `POST /api/live/cancel/{id}` &rarr; Graceful cooperative cancellation
-- `POST /api/live/retry/{id}` &rarr; Re-runs an interrupted or failed job
-
-### 5. CLI Commands
+### Test Commands
 
 ```powershell
-# Resolve any location name, coordinates, or bbox without API keys
-python -m gmaps_scraper resolve --location "Austin, TX"
+# 1. Run Pipeline 2 Step 1 scope and task tracking tests (8 tests)
+python -m pytest tests/test_scope_and_tasks.py -v
 
-# Start an on-demand live scrape with live terminal progress stream
-python -m gmaps_scraper live --query "hospital" --location "Chicago" --max-places 200 --follow
+# 2. Run Pipeline 2 Step 2 website discovery and SSRF tests (12 tests)
+python -m pytest tests/test_website_discovery.py -v
 
-# List recent jobs
-python -m gmaps_scraper jobs
+# 3. Run Pipeline 2 Step 3 website enrichment and extraction tests (14 tests)
+python -m pytest tests/test_website_enrichment.py -v
 
-# Cancel a running job
-python -m gmaps_scraper jobs --cancel <job_id>
+# 4. Run the complete regression test suite (100 tests)
+python -m pytest -v
 ```
+
+### Verified Test Results
+
+| Test Module | Coverage Area | Test Count | Status |
+| :--- | :--- | :--- | :--- |
+| `tests/test_scope_and_tasks.py` | US 50 States, MX 32 Entities, ISO codes, CDMX distinction, task state tracking. | 8 | **100% Passed** |
+| `tests/test_website_discovery.py` | Candidate discovery, multi-signal scoring, SSRF protection, directory filtering. | 12 | **100% Passed** |
+| `tests/test_website_enrichment.py` | Safe crawling, JSON-LD extraction, leadership classification, contact filtering, provenance. | 14 | **100% Passed** |
+| `tests/test_parsers.py` | Google Maps Protobuf/RPC parsing, review extraction, edge cases. | 9 | **100% Passed** |
+| `tests/test_tiling.py` | 4-quadrant spatial decomposition, deduplication across tiles. | 3 | **100% Passed** |
+| `tests/test_resilience.py` | Resume checkpointing, adaptive backoff on 429/503 errors, data export roundtrips. | 5 | **100% Passed** |
+| `tests/test_taxonomy_and_filters.py` | Vertical classification, address parsing, API faceted counts. | 10 | **100% Passed** |
+| `tests/test_web.py` | Dashboard views, places explorer, XSS escaping, offline asset serving. | 16 | **100% Passed** |
+| `tests/test_cleanroom_acceptance.py` | End-to-end cleanroom verification of data ingestion. | 1 | **100% Passed** |
+| `tests/test_live_jobs_api.py` | Asynchronous job state machine, cooperative cancellation, SSE streaming. | 11 | **100% Passed** |
+| `tests/test_db.py` | SQLite schema migrations, indexing, constraint integrity. | 11 | **100% Passed** |
+| **Total Test Suite** | **Full Project Regression** | **100** | **100% Passed** |
 
 ---
 
-## Running the Automated Test Suite
+## L. Security, Reliability & Limitations
 
-Run the full pytest suite:
+### 1. SSRF Protection & Network Safety
+- All candidate URLs and subsequent redirect hops are validated against private, link-local, and reserved IPv4/IPv6 blocks prior to dispatching HTTP requests.
+- Requests to AWS/GCP/Azure cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`) are blocked at the socket/pre-request stage.
+- Non-HTTP(S) schemes (`file://`, `gopher://`, `ftp://`) are rejected.
 
-```powershell
-python -m pytest -q
-```
+### 2. Crawl Politeness & Resource Limits
+- Crawler enforces a strict per-host rate limit and maximum page threshold (default: 5 pages per business).
+- Request timeouts default to 10.0 seconds to prevent hanging worker processes on unresponsive origin servers.
+- The crawler never attempts to bypass CAPTCHA, authentication screens, paywalls, or anti-bot challenge pages. If a page returns `403 Forbidden` or challenge content, the crawler skips the page safely.
 
-All 66 tests validate live geo-resolution, natural language parsing, job state machine, cooperative cancellation, SSE framing, keyset query plans, FastAPI endpoints, resilience retries, XSS protection, and offline asset integrity.
+### 3. Data Preservation & Idempotency
+- Updates to `places`, `company_profiles`, `company_leaders`, and `company_contacts` use `ON CONFLICT DO UPDATE` or `COALESCE` to preserve previously collected valid values.
+- Running discovery or enrichment multiple times on the same business updates existing records without creating duplicate contact or leadership rows.
 
+### 4. Technical Limitations
+- **Client-Side SPA Hydration**: Websites built as Single Page Applications (React, Vue, Angular) that render content strictly via client-side JavaScript without server-side rendering or JSON-LD do not expose leadership text in raw HTTP HTML responses.
+- **Contact Form Obfuscation**: Modern storefronts (e.g. Shopify-hosted sites) often replace direct `mailto:` links with hosted contact forms or third-party CRM widgets (e.g. Gorgias, Zendesk). In these cases, the system captures the dedicated contact-page URL rather than an email address.
+- **Small Business Executive Rosters**: Independent retail shops, cafes, and local service providers rarely publish corporate C-suite rosters on public customer-facing web pages. The extractor strictly records that leadership was not found and avoids fabricating records.
+- **Distinction Between Extracted and Validated Contacts**: Step 3 extracts raw publicly published email strings and phone numbers with source evidence. It does **not** perform SMTP mailbox handshakes, MX deliverability checks, or carrier phone validation.
+
+---
+
+## M. Implementation Status & Roadmap
+
+| Pipeline Stage | Scope & Description | Current Status |
+| :--- | :--- | :--- |
+| **Step 1: Scope & Task Tracking** | USA (50 states) and Mexico (32 entities) scope configuration, ISO validation, `collection_tasks` tracking table, and CLI `scope` command. | **Implemented & Verified** |
+| **Step 2: Official Website Discovery** | Candidate discovery, multi-signal verification scoring, SSRF safeguards, directory rejection, and CLI `website-discover` command. | **Implemented & Verified** |
+| **Step 3: Company Website Extraction** | Bounded same-domain crawler, company profile extraction, JSON-LD & HTML leadership parsing, contact extraction, and CLI `website-enrich` command. | **Implemented & Verified** |
+| **Step 4: Contact Validation & Quality** | Syntax hygiene, MX record verification, SMTP deliverability checks, phone formatting/validation, and cross-source deduplication. | **Planned (Pending Approval)** |
+| **Step 5: Weekly Orchestration** | Scheduled recurring collection, automated re-verification, staleness tracking, and delta reporting across full country regions. | **Planned** |
+
+---
+
+## License & Compliance
+
+This tool is designed for authorized local data collection and analysis. Users are responsible for complying with Google Maps Terms of Service, target website access policies (`robots.txt`), and applicable local data privacy regulations.
