@@ -698,7 +698,73 @@ def website_discover(
     table.add_row("Failed / Inaccessible", str(res["counts"].get("failed", 0)))
     console.print(table)
 
+@app.command("website-enrich")
+def website_enrich(
+    country: str = typer.Option(..., "--country", "-C", help="Target country code: 'US' or 'MX'"),
+    region: Optional[str] = typer.Option(None, "--region", "-r", help="Filter by region/state code (e.g. 'WY', 'NY', 'JAL')"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Max businesses to process in this run"),
+    max_pages: int = typer.Option(5, "--max-pages", help="Maximum pages crawled per website"),
+    retry_failed: bool = typer.Option(False, "--retry-failed", help="Retry previously failed extraction tasks"),
+    force: bool = typer.Option(False, "--force", help="Re-extract for already completed records"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Dry-run mode: extract data without writing to database"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config")
+):
+    """Pipeline 2 Step 3: Extract company info, leadership, and contacts from verified websites."""
+    from .website.enrichment_service import WebsiteEnrichmentService
+    from .scope import validate_target_country, get_region
+
+    cfg = load_config(config_path)
+    db = Database(cfg.absolute_db_path)
+    db.init_schema()
+
+    try:
+        c_code = validate_target_country(country)
+        if region:
+            reg_info = get_region(c_code, region)
+            reg_label = f"{reg_info.name} ({reg_info.code})"
+        else:
+            reg_label = "All configured regions"
+    except ValueError as e:
+        console.print(f"[bold red]Scope Error:[/] {e}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold cyan]Starting Website Information Extraction for {c_code} - {reg_label}...[/]")
+    if dry_run:
+        console.print("[bold yellow]Mode: DRY-RUN (Database will not be modified)[/]")
+
+    service = WebsiteEnrichmentService(db, max_pages=max_pages, user_agent=cfg.user_agent)
+
+    def on_progress(item: Dict[str, Any]):
+        status_color = "green" if item["status"] == "completed" else "yellow" if item["status"] == "partial" else "red"
+        leader_s = f"{item['leaders_count']} leaders"
+        contact_s = f"{item['contacts_count']} contacts"
+        console.print(f"  [{status_color}][{item['status'].upper()}][/] {item['name']} -> {leader_s}, {contact_s}")
+
+    res = asyncio.run(service.run_enrichment(
+        country_code=c_code,
+        region_code=region,
+        limit=limit,
+        max_pages=max_pages,
+        retry_failed=retry_failed,
+        force=force,
+        dry_run=dry_run,
+        on_progress=on_progress
+    ))
+
+    counts = res["counts"]
+    table = Table(title=f"Website Information Extraction Summary ({c_code} - {reg_label})")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", style="green", justify="right")
+    table.add_row("Businesses Processed", str(counts["total_selected"]))
+    table.add_row("Fully Completed", str(counts.get("completed", 0)))
+    table.add_row("Partially Extracted", str(counts.get("partial", 0)))
+    table.add_row("Failed / Inaccessible", str(counts.get("failed", 0)))
+    table.add_row("Total Leaders Extracted", str(counts.get("total_leaders_extracted", 0)))
+    table.add_row("Total Contacts Extracted", str(counts.get("total_contacts_extracted", 0)))
+    console.print(table)
+
 if __name__ == "__main__":
     app()
+
 
 

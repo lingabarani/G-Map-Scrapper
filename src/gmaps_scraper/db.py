@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS places (
     website_evidence TEXT,
     website_last_checked TIMESTAMP,
     website_error TEXT,
+    official_website_url TEXT,
+    enrichment_status TEXT,
+    enrichment_last_checked TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -233,6 +236,55 @@ CREATE INDEX IF NOT EXISTS idx_tasks_region ON collection_tasks(country_code, re
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON collection_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_region_status ON collection_tasks(country_code, region_code, status);
 
+-- Step 3: Company Profile & Website Enrichment Records
+CREATE TABLE IF NOT EXISTS company_profiles (
+    cid TEXT PRIMARY KEY,
+    overview TEXT,
+    industry TEXT,
+    services_json TEXT,
+    locations_json TEXT,
+    contact_page_url TEXT,
+    source_pages_json TEXT,
+    extraction_status TEXT DEFAULT 'completed',
+    last_extracted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(cid) REFERENCES places(cid) ON DELETE CASCADE
+);
+
+-- Step 3: Public Leadership Records
+CREATE TABLE IF NOT EXISTS company_leaders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cid TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    role_type TEXT,
+    biography TEXT,
+    source_url TEXT,
+    confidence REAL DEFAULT 1.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(cid, full_name, title),
+    FOREIGN KEY(cid) REFERENCES places(cid) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_leaders_cid ON company_leaders(cid);
+
+-- Step 3: Public Business Contact Records
+CREATE TABLE IF NOT EXISTS company_contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cid TEXT NOT NULL,
+    contact_type TEXT NOT NULL,
+    contact_value TEXT NOT NULL,
+    label TEXT DEFAULT 'general',
+    source_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(cid, contact_type, contact_value),
+    FOREIGN KEY(cid) REFERENCES places(cid) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_cid ON company_contacts(cid);
+
 -- Triggers to maintain FTS index
 CREATE TRIGGER IF NOT EXISTS places_ai AFTER INSERT ON places BEGIN
   INSERT INTO places_fts(rowid, name, address, phone, website, category)
@@ -290,6 +342,9 @@ class Database:
                 ("website_evidence", "TEXT"),
                 ("website_last_checked", "TIMESTAMP"),
                 ("website_error", "TEXT"),
+                ("official_website_url", "TEXT"),
+                ("enrichment_status", "TEXT"),
+                ("enrichment_last_checked", "TIMESTAMP"),
             ]
             for col_name, col_type in new_columns:
                 if col_name not in existing_cols:
@@ -302,6 +357,12 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_city ON places(city);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_job ON places(first_seen_job_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_website_status ON places(website_status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_official_url ON places(official_website_url);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_enrichment_status ON places(enrichment_status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_city ON places(city);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_job ON places(first_seen_job_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_website_status ON places(website_status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_enrichment_status ON places(enrichment_status);")
 
             # Populate verticals lookup table
             from .taxonomy import load_verticals, load_countries
@@ -388,6 +449,9 @@ class Database:
             "review_count": 0,
             "status": "pending",
             "first_seen_job_id": None,
+            "website_status": None,
+            "official_website_url": None,
+            "enrichment_status": None,
         }
         merged = {**defaults, **place}
 
@@ -397,13 +461,15 @@ class Database:
             latitude, longitude, website, phone, phone_e164,
             category, vertical, vertical_raw, country, country_code,
             region, city, postal_code, rating, review_count, status,
-            first_seen_job_id, created_at, updated_at
+            first_seen_job_id, website_status, official_website_url, enrichment_status,
+            created_at, updated_at
         ) VALUES (
             :cid, :ftid, :place_id, :name, :address, :street_address,
             :latitude, :longitude, :website, :phone, :phone_e164,
             :category, :vertical, :vertical_raw, :country, :country_code,
             :region, :city, :postal_code, :rating, :review_count, :status,
-            :first_seen_job_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            :first_seen_job_id, :website_status, :official_website_url, :enrichment_status,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         ON CONFLICT(cid) DO UPDATE SET
             ftid = COALESCE(excluded.ftid, places.ftid),
@@ -426,6 +492,9 @@ class Database:
             rating = COALESCE(excluded.rating, places.rating),
             review_count = MAX(places.review_count, excluded.review_count),
             first_seen_job_id = COALESCE(places.first_seen_job_id, excluded.first_seen_job_id),
+            website_status = COALESCE(excluded.website_status, places.website_status),
+            official_website_url = COALESCE(excluded.official_website_url, places.official_website_url),
+            enrichment_status = COALESCE(excluded.enrichment_status, places.enrichment_status),
             updated_at = CURRENT_TIMESTAMP;
         """
         with self.get_connection() as conn:
@@ -1438,6 +1507,12 @@ class Database:
             website_evidence = :evidence,
             website_error = :error,
             website_last_checked = CURRENT_TIMESTAMP,
+            official_website_url = CASE
+                WHEN :website IS NOT NULL AND :status = 'verified' THEN :website
+                WHEN :candidate IS NOT NULL AND :status = 'verified' THEN :candidate
+                WHEN official_website_url IS NOT NULL THEN official_website_url
+                ELSE :website
+            END,
             website = CASE
                 WHEN :website IS NOT NULL AND :status = 'verified' THEN :website
                 WHEN website IS NOT NULL THEN website
@@ -1489,5 +1564,204 @@ class Database:
                 "candidate": counts.get("candidate", 0),
                 "unverified": counts.get("unverified", 0),
             }
+
+    # -------------------------------------------------------------------------
+    # Company Website Enrichment: Profile, Leadership & Contacts (Step 3)
+    # -------------------------------------------------------------------------
+
+    def get_verified_businesses_for_enrichment(
+        self,
+        country_code: str,
+        region_code: Optional[str] = None,
+        limit: int = 50,
+        retry_failed: bool = False,
+        force: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves businesses strictly with verified official websites for Step 3 enrichment.
+        Excludes unverified, failed, or missing websites unless forced.
+        """
+        query = """
+            SELECT * FROM places
+            WHERE country_code = ?
+              AND website_status = 'verified'
+              AND (
+                  (official_website_url IS NOT NULL AND official_website_url != '')
+                  OR
+                  (website IS NOT NULL AND website != '')
+              )
+        """
+        params: List[Any] = [country_code.upper()]
+
+        if region_code:
+            query += " AND (region = ? OR region = ?)"
+            params.extend([region_code.upper(), region_code.lower()])
+
+        if force:
+            pass
+        elif retry_failed:
+            query += " AND (enrichment_status IN ('failed', 'partial', 'no_data') OR enrichment_status IS NULL)"
+        else:
+            query += " AND (enrichment_status IS NULL OR enrichment_status = 'pending')"
+
+        query += " ORDER BY created_at ASC LIMIT ?"
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def save_company_profile(self, cid: str, profile_data: Optional[Dict[str, Any]] = None, **kwargs) -> bool:
+        """Upserts company overview, services, locations, and source pages for a business."""
+        data = {**(profile_data or {}), **kwargs}
+        sql = """
+        INSERT INTO company_profiles (
+            cid, overview, industry, services_json, locations_json,
+            contact_page_url, source_pages_json, extraction_status,
+            last_extracted, last_error, created_at, updated_at
+        ) VALUES (
+            :cid, :overview, :industry, :services_json, :locations_json,
+            :contact_page_url, :source_pages_json, :extraction_status,
+            CURRENT_TIMESTAMP, :last_error, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(cid) DO UPDATE SET
+            overview = COALESCE(excluded.overview, company_profiles.overview),
+            industry = COALESCE(excluded.industry, company_profiles.industry),
+            services_json = COALESCE(excluded.services_json, company_profiles.services_json),
+            locations_json = COALESCE(excluded.locations_json, company_profiles.locations_json),
+            contact_page_url = COALESCE(excluded.contact_page_url, company_profiles.contact_page_url),
+            source_pages_json = COALESCE(excluded.source_pages_json, company_profiles.source_pages_json),
+            extraction_status = excluded.extraction_status,
+            last_extracted = CURRENT_TIMESTAMP,
+            last_error = excluded.last_error,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        params = {
+            "cid": cid,
+            "overview": data.get("overview"),
+            "industry": data.get("industry"),
+            "services_json": json.dumps(data.get("services", [])) if isinstance(data.get("services"), (list, dict)) else data.get("services_json"),
+            "locations_json": json.dumps(data.get("locations", [])) if isinstance(data.get("locations"), (list, dict)) else data.get("locations_json"),
+            "contact_page_url": data.get("contact_page_url"),
+            "source_pages_json": json.dumps(data.get("source_pages", [])) if isinstance(data.get("source_pages"), (list, dict)) else data.get("source_pages_json"),
+            "extraction_status": data.get("extraction_status", "completed"),
+            "last_error": data.get("last_error"),
+        }
+        with self.get_connection() as conn:
+            cur = conn.execute(sql, params)
+            # Update place status
+            conn.execute("""
+                UPDATE places
+                SET enrichment_status = :status,
+                    enrichment_last_checked = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE cid = :cid
+            """, {"status": data.get("extraction_status", "completed"), "cid": cid})
+            conn.commit()
+            return cur.rowcount > 0
+
+    def save_company_leaders(self, cid: str, leaders: List[Dict[str, Any]]) -> int:
+        """Idempotently saves public company leadership records, preventing duplicates on re-runs."""
+        if not leaders:
+            return 0
+
+        sql = """
+        INSERT INTO company_leaders (
+            cid, full_name, title, role_type, biography, source_url, confidence,
+            created_at, updated_at
+        ) VALUES (
+            :cid, :full_name, :title, :role_type, :biography, :source_url, :confidence,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(cid, full_name, title) DO UPDATE SET
+            role_type = COALESCE(excluded.role_type, company_leaders.role_type),
+            biography = COALESCE(excluded.biography, company_leaders.biography),
+            source_url = COALESCE(excluded.source_url, company_leaders.source_url),
+            confidence = excluded.confidence,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        count = 0
+        with self.get_connection() as conn:
+            for ldr in leaders:
+                conf_raw = ldr.get("confidence", 1.0)
+                if isinstance(conf_raw, (int, float)):
+                    conf_val = float(conf_raw)
+                elif isinstance(conf_raw, str) and conf_raw.replace('.', '', 1).isdigit():
+                    conf_val = float(conf_raw)
+                elif isinstance(conf_raw, str):
+                    conf_map = {"high": 0.95, "medium": 0.75, "low": 0.5}
+                    conf_val = conf_map.get(conf_raw.lower(), 0.8)
+                else:
+                    conf_val = 1.0
+
+                params = {
+                    "cid": cid,
+                    "full_name": ldr["full_name"],
+                    "title": ldr["title"],
+                    "role_type": ldr.get("role_type"),
+                    "biography": ldr.get("biography"),
+                    "source_url": ldr.get("source_url"),
+                    "confidence": conf_val,
+                }
+                cur = conn.execute(sql, params)
+                if cur.rowcount > 0:
+                    count += 1
+            conn.commit()
+            return count
+
+    def save_company_contacts(self, cid: str, contacts: List[Dict[str, Any]]) -> int:
+        """Idempotently saves public company business contacts, preventing duplicates on re-runs."""
+        if not contacts:
+            return 0
+
+        sql = """
+        INSERT INTO company_contacts (
+            cid, contact_type, contact_value, label, source_url,
+            created_at, updated_at
+        ) VALUES (
+            :cid, :contact_type, :contact_value, :label, :source_url,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(cid, contact_type, contact_value) DO UPDATE SET
+            label = COALESCE(excluded.label, company_contacts.label),
+            source_url = COALESCE(excluded.source_url, company_contacts.source_url),
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        count = 0
+        with self.get_connection() as conn:
+            for c in contacts:
+                params = {
+                    "cid": cid,
+                    "contact_type": c["contact_type"],
+                    "contact_value": c["contact_value"],
+                    "label": c.get("label", "general"),
+                    "source_url": c.get("source_url"),
+                }
+                cur = conn.execute(sql, params)
+                if cur.rowcount > 0:
+                    count += 1
+            conn.commit()
+            return count
+
+    def get_company_enrichment(self, cid: str) -> Dict[str, Any]:
+        """Retrieves full company profile, leadership, and contacts for a business."""
+        with self.get_connection() as conn:
+            prof_row = conn.execute("SELECT * FROM company_profiles WHERE cid = ?", (cid,)).fetchone()
+            profile = dict(prof_row) if prof_row else None
+            if profile:
+                profile["services"] = json.loads(profile["services_json"]) if profile.get("services_json") else []
+                profile["locations"] = json.loads(profile["locations_json"]) if profile.get("locations_json") else []
+                profile["source_pages"] = json.loads(profile["source_pages_json"]) if profile.get("source_pages_json") else []
+
+            leaders = [dict(r) for r in conn.execute("SELECT * FROM company_leaders WHERE cid = ? ORDER BY id ASC", (cid,)).fetchall()]
+            contacts = [dict(r) for r in conn.execute("SELECT * FROM company_contacts WHERE cid = ? ORDER BY id ASC", (cid,)).fetchall()]
+
+            return {
+                "cid": cid,
+                "profile": profile,
+                "leaders": leaders,
+                "contacts": contacts
+            }
+
 
 
