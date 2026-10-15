@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -638,6 +638,67 @@ def scope(
 
         console.print(r_table)
 
+@app.command("website-discover")
+def website_discover(
+    country: str = typer.Option(..., "--country", "-C", help="Target country code: 'US' or 'MX'"),
+    region: Optional[str] = typer.Option(None, "--region", "-r", help="Filter by region/state code (e.g. 'WY', 'NY', 'JAL')"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max businesses to process in this run"),
+    retry_failed: bool = typer.Option(False, "--retry-failed", help="Retry previously failed or unverified website tasks"),
+    force: bool = typer.Option(False, "--force", help="Re-verify already verified records"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Dry-run mode: evaluate candidates without writing to database"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config")
+):
+    """Pipeline 2 Step 2: Discover and verify official websites for businesses."""
+    from .website.service import WebsiteDiscoveryService
+    from .scope import validate_target_country, get_region
+
+    cfg = load_config(config_path)
+    db = Database(cfg.absolute_db_path)
+    db.init_schema()
+
+    try:
+        c_code = validate_target_country(country)
+        if region:
+            reg_info = get_region(c_code, region)
+            reg_label = f"{reg_info.name} ({reg_info.code})"
+        else:
+            reg_label = "All configured regions"
+    except ValueError as e:
+        console.print(f"[bold red]Scope Error:[/] {e}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold cyan]Starting Official Website Discovery for {c_code} - {reg_label}...[/]")
+    if dry_run:
+        console.print("[bold yellow]Mode: DRY-RUN (Database will not be modified)[/]")
+
+    service = WebsiteDiscoveryService(db, user_agent=cfg.user_agent)
+
+    def on_progress(item: Dict[str, Any]):
+        status_color = "green" if item["status"] == "verified" else "yellow" if item["status"] == "needs_review" else "red"
+        cand_str = item.get("candidate") or "[dim]None[/]"
+        console.print(f"  [{status_color}][{item['status'].upper()}][/] {item['name']} -> {cand_str}")
+
+    res = asyncio.run(service.run_discovery(
+        country_code=c_code,
+        region_code=region,
+        limit=limit,
+        retry_failed=retry_failed,
+        force=force,
+        dry_run=dry_run,
+        on_progress=on_progress
+    ))
+
+    table = Table(title=f"Website Discovery Summary ({c_code} - {reg_label})")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", style="green", justify="right")
+    table.add_row("Businesses Inspected", str(res["total_inspected"]))
+    table.add_row("Verified Websites", str(res["counts"].get("verified", 0)))
+    table.add_row("Needs Review", str(res["counts"].get("needs_review", 0)))
+    table.add_row("Website Missing", str(res["counts"].get("website_missing", 0)))
+    table.add_row("Failed / Inaccessible", str(res["counts"].get("failed", 0)))
+    console.print(table)
+
 if __name__ == "__main__":
     app()
+
 

@@ -197,10 +197,14 @@ def enrich_place_dimensions(place: Dict[str, Any]) -> Dict[str, Any]:
     place["vertical_raw"] = vertical_raw
 
     address_info = parse_address(place.get("address"))
-    place["country"] = address_info["country"]
-    place["country_code"] = address_info["country_code"]
-    place["region"] = address_info["region"]
-    place["city"] = address_info["city"]
-    place["postal_code"] = address_info["postal_code"]
+    if address_info["country_code"] != "unknown" or not place.get("country_code"):
+        place["country"] = address_info["country"]
+        place["country_code"] = address_info["country_code"]
+    if address_info["region"] is not None or not place.get("region"):
+        place["region"] = address_info["region"]
+    if address_info["city"] is not None or not place.get("city"):
+        place["city"] = address_info["city"]
+    if address_info["postal_code"] is not None or not place.get("postal_code"):
+        place["postal_code"] = address_info["postal_code"]
 
     return place

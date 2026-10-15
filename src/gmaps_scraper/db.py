@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS places (
     status TEXT DEFAULT 'pending',
     attempts INTEGER DEFAULT 0,
     error TEXT,
+    website_status TEXT,
+    website_candidate TEXT,
+    website_discovery_method TEXT,
+    website_evidence TEXT,
+    website_last_checked TIMESTAMP,
+    website_error TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -278,6 +284,12 @@ class Database:
                 ("city", "TEXT"),
                 ("postal_code", "TEXT"),
                 ("first_seen_job_id", "TEXT"),
+                ("website_status", "TEXT"),
+                ("website_candidate", "TEXT"),
+                ("website_discovery_method", "TEXT"),
+                ("website_evidence", "TEXT"),
+                ("website_last_checked", "TIMESTAMP"),
+                ("website_error", "TEXT"),
             ]
             for col_name, col_type in new_columns:
                 if col_name not in existing_cols:
@@ -289,6 +301,7 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_country_code ON places(country_code);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_city ON places(city);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_places_job ON places(first_seen_job_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_places_website_status ON places(website_status);")
 
             # Populate verticals lookup table
             from .taxonomy import load_verticals, load_countries
@@ -1363,4 +1376,118 @@ class Database:
             cur = conn.execute(query, params)
             conn.commit()
             return cur.rowcount
+
+    # -------------------------------------------------------------------------
+    # Official Website Discovery & Verification (Pipeline 2 Step 2)
+    # -------------------------------------------------------------------------
+
+    def get_businesses_for_website_discovery(
+        self,
+        country_code: str,
+        region_code: Optional[str] = None,
+        limit: int = 50,
+        retry_failed: bool = False,
+        force: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves eligible business records for official website discovery and verification.
+        Filters strictly by target country (e.g. US or MX) and optional state/entity region.
+        """
+        query = "SELECT * FROM places WHERE country_code = ?"
+        params: List[Any] = [country_code.upper()]
+
+        if region_code:
+            query += " AND (region = ? OR region = ?)"
+            params.extend([region_code.upper(), region_code.lower()])
+
+        if force:
+            pass
+        elif retry_failed:
+            query += " AND (website_status IN ('failed', 'needs_review', 'website_missing') OR website_status IS NULL)"
+        else:
+            query += " AND (website_status IS NULL OR website_status = 'pending')"
+
+        query += " ORDER BY CASE WHEN website IS NOT NULL THEN 0 ELSE 1 END, created_at ASC LIMIT ?"
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_business_website_verification(
+        self,
+        cid: str,
+        status: str,
+        website: Optional[str] = None,
+        candidate: Optional[str] = None,
+        discovery_method: Optional[str] = None,
+        evidence: Optional[Any] = None,
+        error: Optional[str] = None
+    ) -> bool:
+        """
+        Transactionally updates website verification status, candidate, verified URL,
+        discovery method, and supporting evidence JSON for a business record.
+        """
+        evidence_json = json.dumps(evidence) if isinstance(evidence, (dict, list)) else evidence
+
+        sql = """
+        UPDATE places SET
+            website_status = :status,
+            website_candidate = :candidate,
+            website_discovery_method = :discovery_method,
+            website_evidence = :evidence,
+            website_error = :error,
+            website_last_checked = CURRENT_TIMESTAMP,
+            website = CASE
+                WHEN :website IS NOT NULL AND :status = 'verified' THEN :website
+                WHEN website IS NOT NULL THEN website
+                ELSE :website
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE cid = :cid;
+        """
+        params = {
+            "cid": cid,
+            "status": status,
+            "candidate": candidate,
+            "discovery_method": discovery_method,
+            "evidence": evidence_json,
+            "error": error,
+            "website": website,
+        }
+        with self.get_connection() as conn:
+            cur = conn.execute(sql, params)
+            conn.commit()
+            return cur.rowcount > 0
+
+    def get_website_discovery_stats(
+        self,
+        country_code: Optional[str] = None,
+        region_code: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Returns aggregation of website discovery and verification statuses."""
+        query = "SELECT website_status, count(*) as cnt FROM places WHERE 1=1"
+        params: List[Any] = []
+        if country_code:
+            query += " AND country_code = ?"
+            params.append(country_code.upper())
+        if region_code:
+            query += " AND (region = ? OR region = ?)"
+            params.extend([region_code.upper(), region_code.lower()])
+        query += " GROUP BY website_status"
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            counts = {r["website_status"] or "unverified": r["cnt"] for r in rows}
+            total = sum(counts.values())
+            return {
+                "total_places": total,
+                "verified": counts.get("verified", 0),
+                "needs_review": counts.get("needs_review", 0),
+                "website_missing": counts.get("website_missing", 0),
+                "failed": counts.get("failed", 0),
+                "candidate": counts.get("candidate", 0),
+                "unverified": counts.get("unverified", 0),
+            }
+
 
