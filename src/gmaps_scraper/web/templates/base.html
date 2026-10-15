@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}GMap Scraper Local Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="top-nav">
+    <div style="display:flex;align-items:center;gap:16px;">
+      <a href="/" class="brand">
+        <span class="brand-badge">LOCAL</span>
+        <span>GMaps Scraper</span>
+        <span class="offline-indicator">
+          <span class="dot"></span> 100% Offline
+        </span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="/live" class="nav-link {% if active_page == 'live' %}active{% endif %}" style="display:inline-flex;align-items:center;gap:6px;">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span>
+          Live Search
+        </a>
+        <a href="/places" class="nav-link {% if active_page == 'places' %}active{% endif %}">Places</a>
+        <a href="/map" class="nav-link {% if active_page == 'map' %}active{% endif %}">Map</a>
+        <a href="/runs" class="nav-link {% if active_page == 'runs' %}active{% endif %}">Runs & Logs</a>
+        <a href="/quality" class="nav-link {% if active_page == 'quality' %}active{% endif %}">Quality</a>
+      </nav>
+    </div>
+
+    <div class="keyboard-hint">
+      <span>Shortcuts:</span>
+      <kbd>/</kbd> search
+      <kbd>j</kbd><kbd>k</kbd> rows
+      <kbd>Enter</kbd> open
+      <kbd>Esc</kbd> close
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Slide-in Detail Drawer -->
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="Drawer.close()"></div>
+  <aside class="detail-drawer" id="detailDrawer">
+    <div id="drawerContent"></div>
+  </aside>
+
+  <!-- Local Scripts (Zero CDN) -->
+  <script src="/static/js/canvas_charts.js"></script>
+  <script src="/static/js/canvas_map.js"></script>
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+
+</body>
+</html>

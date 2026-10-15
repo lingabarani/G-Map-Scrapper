@@ -1,0 +1,153 @@
+# ISO-3166-1 alpha-2 Local Country Registry and Aliases
+# Used strictly for offline local country resolution.
+
+US:
+  name: "United States"
+  aliases: ["united states", "usa", "us", "u.s.", "u.s.a.", "united states of america", "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy", "dc"]
+GB:
+  name: "United Kingdom"
+  aliases: ["united kingdom", "uk", "u.k.", "great britain", "england", "scotland", "wales", "northern ireland"]
+CA:
+  name: "Canada"
+  aliases: ["canada", "ca", "ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan", "nova scotia", "new brunswick", "on", "qc", "bc", "ab", "mb", "sk", "ns", "nb"]
+FR:
+  name: "France"
+  aliases: ["france", "fr", "république française"]
+DE:
+  name: "Germany"
+  aliases: ["germany", "deutschland", "de"]
+IT:
+  name: "Italy"
+  aliases: ["italy", "italia", "it"]
+ES:
+  name: "Spain"
+  aliases: ["spain", "españa", "es"]
+AU:
+  name: "Australia"
+  aliases: ["australia", "au", "nsw", "vic", "qld", "wa", "sa", "tas", "act", "nt"]
+IN:
+  name: "India"
+  aliases: ["india", "in", "bharat"]
+JP:
+  name: "Japan"
+  aliases: ["japan", "jp", "nippon", "nihon"]
+CN:
+  name: "China"
+  aliases: ["china", "cn"]
+BR:
+  name: "Brazil"
+  aliases: ["brazil", "brasil", "br"]
+MX:
+  name: "Mexico"
+  aliases: ["mexico", "méxico", "mx"]
+NL:
+  name: "Netherlands"
+  aliases: ["netherlands", "nl", "holland", "the netherlands"]
+SE:
+  name: "Sweden"
+  aliases: ["sweden", "se", "sverige"]
+CH:
+  name: "Switzerland"
+  aliases: ["switzerland", "ch", "schweiz", "suisse", "svizzera"]
+AE:
+  name: "United Arab Emirates"
+  aliases: ["united arab emirates", "uae", "u.a.e.", "ae", "dubai", "abu dhabi"]
+SG:
+  name: "Singapore"
+  aliases: ["singapore", "sg"]
+NZ:
+  name: "New Zealand"
+  aliases: ["new zealand", "nz"]
+ZA:
+  name: "South Africa"
+  aliases: ["south africa", "za"]
+IE:
+  name: "Ireland"
+  aliases: ["ireland", "ie", "éire"]
+BE:
+  name: "Belgium"
+  aliases: ["belgium", "be", "belgique", "belgië"]
+AT:
+  name: "Austria"
+  aliases: ["austria", "at", "österreich"]
+DK:
+  name: "Denmark"
+  aliases: ["denmark", "dk", "danmark"]
+FI:
+  name: "Finland"
+  aliases: ["finland", "fi", "suomi"]
+"NO":
+  name: "Norway"
+  aliases: ["norway", "no", "norge"]
+PL:
+  name: "Poland"
+  aliases: ["poland", "pl", "polska"]
+PT:
+  name: "Portugal"
+  aliases: ["portugal", "pt"]
+GR:
+  name: "Greece"
+  aliases: ["greece", "gr", "hellas"]
+TR:
+  name: "Turkey"
+  aliases: ["turkey", "tr", "türkiye"]
+KR:
+  name: "South Korea"
+  aliases: ["south korea", "korea", "kr", "republic of korea"]
+AR:
+  name: "Argentina"
+  aliases: ["argentina", "ar"]
+CL:
+  name: "Chile"
+  aliases: ["chile", "cl"]
+CO:
+  name: "Colombia"
+  aliases: ["colombia", "co"]
+PE:
+  name: "Peru"
+  aliases: ["peru", "pe", "perú"]
+PH:
+  name: "Philippines"
+  aliases: ["philippines", "ph"]
+ID:
+  name: "Indonesia"
+  aliases: ["indonesia", "id"]
+TH:
+  name: "Thailand"
+  aliases: ["thailand", "th"]
+MY:
+  name: "Malaysia"
+  aliases: ["malaysia", "my"]
+VN:
+  name: "Vietnam"
+  aliases: ["vietnam", "vn"]
+IL:
+  name: "Israel"
+  aliases: ["israel", "il"]
+SA:
+  name: "Saudi Arabia"
+  aliases: ["saudi arabia", "sa"]
+EG:
+  name: "Egypt"
+  aliases: ["egypt", "eg"]
+NG:
+  name: "Nigeria"
+  aliases: ["nigeria", "ng"]
+KE:
+  name: "Kenya"
+  aliases: ["kenya", "ke"]
+RU:
+  name: "Russia"
+  aliases: ["russia", "ru"]
+UA:
+  name: "Ukraine"
+  aliases: ["ukraine", "ua"]
+CZ:
+  name: "Czech Republic"
+  aliases: ["czech republic", "czechia", "cz"]
+RO:
+  name: "Romania"
+  aliases: ["romania", "ro"]
+HU:
+  name: "Hungary"
+  aliases: ["hungary", "hu"]

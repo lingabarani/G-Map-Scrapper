@@ -1,0 +1,526 @@
+{% extends "base.html" %}
+
+{% block title %}{{ place.name or 'Place' }} — Full Place Record{% endblock %}
+
+{% block content %}
+<div class="view-header" style="margin-bottom:16px;">
+  <div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+      <a href="/places" style="color:var(--text-muted);text-decoration:none;">&larr; Back to Places Explorer</a>
+    </div>
+    <h1 class="view-title">{{ place.name or 'Unnamed Place' }}</h1>
+    <div class="view-subtitle">
+      <span class="badge" style="background:var(--bg-surface-hover);color:var(--accent-cyan);">{{ place.vertical or 'other' }}</span>
+      &bull; {{ place.category or 'Uncategorized' }}
+      {% if place.city %}&bull; {{ place.city }}{% endif %}
+      {% if place.country %}, {{ place.country }}{% endif %}
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <label class="toggle-control" title="Show or hide unpopulated fields">
+      <input type="checkbox" id="toggleEmptyFields" onchange="toggleEmpty(this.checked)">
+      <span class="toggle-slider"></span>
+      <span style="font-size:12px;color:var(--text-secondary);margin-left:6px;cursor:pointer;">Show Empty Fields</span>
+    </label>
+    <button id="copyJsonBtn" onclick="copyPlaceJson()" class="btn btn-secondary btn-sm">📋 Copy as JSON</button>
+    <button id="dlJsonBtn" onclick="downloadPlaceJson()" class="btn btn-secondary btn-sm">⬇ Download Record</button>
+    {% if place.website %}
+      <a href="{{ place.website }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Visit Website ↗</a>
+    {% endif %}
+  </div>
+</div>
+
+<div id="recordContainer" class="record-grid">
+  <!-- Left Column: Core Data Groups -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    
+    <!-- 1. Identity -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">ID</span>
+        <h3>Identity</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row {% if not place.name %}empty-field{% endif %}">
+          <div class="field-label">Place Name</div>
+          <div class="field-val" style="font-weight:600;color:var(--text-primary);">{{ place.name or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.cid %}empty-field{% endif %}">
+          <div class="field-label">CID (Customer ID)</div>
+          <div class="field-val mono-col">{{ place.cid or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.place_id %}empty-field{% endif %}">
+          <div class="field-label">Place ID</div>
+          <div class="field-val mono-col">{{ place.place_id or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.ftid %}empty-field{% endif %}">
+          <div class="field-label">Feature ID (FTID)</div>
+          <div class="field-val mono-col">{{ place.ftid or '—' }}</div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Claimed Status</div>
+          <div class="field-val">
+            {% if place.claimed_status %}
+              <span class="badge" style="background:var(--accent-green-glow);color:var(--accent-green);border:1px solid var(--accent-green);">Verified Business</span>
+            {% else %}
+              <span class="badge" style="background:var(--bg-surface-hover);color:var(--text-muted);">Unclaimed</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Processing Status</div>
+          <div class="field-val">
+            <span class="badge badge-status-{{ place.status }}">{{ place.status | upper }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Location -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);border-color:var(--accent-cyan);">LOC</span>
+        <h3>Location</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row {% if not place.address %}empty-field{% endif %}">
+          <div class="field-label">Full Address</div>
+          <div class="field-val">{{ place.address or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.street_address %}empty-field{% endif %}">
+          <div class="field-label">Street Address</div>
+          <div class="field-val">{{ place.street_address or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.city %}empty-field{% endif %}">
+          <div class="field-label">City</div>
+          <div class="field-val">{{ place.city or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.region %}empty-field{% endif %}">
+          <div class="field-label">State / Region</div>
+          <div class="field-val">{{ place.region or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.postal_code %}empty-field{% endif %}">
+          <div class="field-label">Postal Code</div>
+          <div class="field-val mono-col">{{ place.postal_code or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.country %}empty-field{% endif %}">
+          <div class="field-label">Country</div>
+          <div class="field-val">
+            {{ place.country or '—' }}
+            {% if place.country_code and place.country_code != 'unknown' %}
+              <span class="badge" style="margin-left:6px;background:var(--bg-surface-hover);">{{ place.country_code }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row {% if not place.latitude and not place.longitude %}empty-field{% endif %}">
+          <div class="field-label">Coordinates</div>
+          <div class="field-val mono-col">
+            {% if place.latitude is not none and place.longitude is not none %}
+              {{ place.latitude }}, {{ place.longitude }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row {% if not place.timezone %}empty-field{% endif %}">
+          <div class="field-label">Timezone</div>
+          <div class="field-val mono-col">{{ place.timezone or '—' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Contact -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:var(--accent-purple);color:#fff;border-color:transparent;">TEL</span>
+        <h3>Contact</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row {% if not place.phone %}empty-field{% endif %}">
+          <div class="field-label">Display Phone</div>
+          <div class="field-val mono-col">{{ place.phone or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.phone_e164 %}empty-field{% endif %}">
+          <div class="field-label">E.164 Phone</div>
+          <div class="field-val mono-col">{{ place.phone_e164 or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.website %}empty-field{% endif %}">
+          <div class="field-label">Website</div>
+          <div class="field-val">
+            {% if place.website %}
+              <a href="{{ place.website }}" target="_blank" rel="noopener" style="color:var(--accent-cyan);word-break:break-all;">{{ place.website }}</a>
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Categories & Vertical -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:var(--accent-amber-glow);color:var(--accent-amber);border-color:var(--accent-amber);">CAT</span>
+        <h3>Categories &amp; Taxonomy</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row {% if not place.vertical %}empty-field{% endif %}">
+          <div class="field-label">Business Vertical</div>
+          <div class="field-val">
+            <span class="badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);font-weight:600;font-size:12px;">{{ place.vertical or 'other' }}</span>
+          </div>
+        </div>
+        <div class="field-row {% if not place.category %}empty-field{% endif %}">
+          <div class="field-label">Google Category</div>
+          <div class="field-val">{{ place.category or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.vertical_raw %}empty-field{% endif %}">
+          <div class="field-label">Raw Google Category</div>
+          <div class="field-val mono-col">{{ place.vertical_raw or '—' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Ratings & Reviews Summary -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:var(--accent-amber-glow);color:var(--accent-amber);border-color:var(--accent-amber);">★</span>
+        <h3>Ratings &amp; Reviews</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row {% if not place.rating %}empty-field{% endif %}">
+          <div class="field-label">Star Rating</div>
+          <div class="field-val">
+            {% if place.rating %}
+              <span class="rating-badge rating-high" style="font-size:13px;padding:3px 8px;">{{ place.rating }}★</span>
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Total Review Count</div>
+          <div class="field-val mono-col">{{ place.review_count if place.review_count is not none else 0 }}</div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Local Scraped Reviews</div>
+          <div class="field-val mono-col">{{ place.reviews | length }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Operating Hours -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">HRS</span>
+        <h3>Hours (Full Week)</h3>
+      </div>
+      {% if place.hours %}
+        <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;">
+          {% for h in place.hours %}
+            <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:var(--text-muted);font-weight:600;">{{ h.day_name }}</span>
+              <span style="color:{% if h.is_closed %}var(--accent-rose){% else %}var(--text-primary){% endif %};">
+                {{ h.formatted_text or ('Closed' if h.is_closed else '—') }}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-dash">No operating hours recorded for this place.</div>
+      {% endif %}
+    </div>
+
+    <!-- 7. Attributes by Category -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">ATTR</span>
+        <h3>Attributes & Features</h3>
+      </div>
+      {% if place.attributes %}
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          {% for group, items in place.attributes | groupby('group_name') %}
+            <div>
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.5px;">
+                {{ group or 'General Features' }}
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                {% for a in items %}
+                  <span class="badge" style="background:var(--bg-surface);color:{% if a.is_enabled %}var(--text-primary){% else %}var(--text-muted){% endif %};border:1px solid var(--border-subtle);padding:4px 8px;">
+                    {% if a.is_enabled %}✓{% else %}✗{% endif %} {{ a.display_value or a.attribute_name }}
+                  </span>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-dash">No attributes extracted for this place.</div>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Right Column: Media, Popular Times, Reviews, Provenance -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    
+    <!-- 8. Provenance -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:var(--bg-surface-active);color:var(--text-secondary);">SRC</span>
+        <h3>Provenance &amp; Metadata</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row">
+          <div class="field-label">Google Maps URL</div>
+          <div class="field-val">
+            <a href="https://www.google.com/maps/place/?q=place_id:{{ place.place_id or place.cid }}" target="_blank" rel="noopener" style="color:var(--accent-cyan);word-break:break-all;">
+              google.com/maps/place ↗
+            </a>
+          </div>
+        </div>
+        <div class="field-row {% if not place.created_at %}empty-field{% endif %}">
+          <div class="field-label">Scraped At</div>
+          <div class="field-val mono-col">{{ place.created_at or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.updated_at %}empty-field{% endif %}">
+          <div class="field-label">Last Updated</div>
+          <div class="field-val mono-col">{{ place.updated_at or '—' }}</div>
+        </div>
+        <div class="field-row {% if not place.attempts %}empty-field{% endif %}">
+          <div class="field-label">Pipeline Attempts</div>
+          <div class="field-val mono-col">{{ place.attempts if place.attempts is not none else 0 }}</div>
+        </div>
+        <div class="field-row {% if not place.error %}empty-field{% endif %}">
+          <div class="field-label">Last Error</div>
+          <div class="field-val" style="color:var(--accent-rose);">{{ place.error or '—' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. Popular Times -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">POP</span>
+        <h3>Popular Times (Hourly Activity)</h3>
+      </div>
+      {% if place.popular_times %}
+        <canvas id="placePopularTimes" height="130" style="width:100%;"></canvas>
+      {% else %}
+        <div class="empty-dash">No popular times activity recorded.</div>
+      {% endif %}
+    </div>
+
+    <!-- 10. Photos Gallery -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">IMG</span>
+        <h3>Photos Gallery ({{ place.photos | length }})</h3>
+      </div>
+      {% if place.photos %}
+        <div class="photo-gallery" style="max-height:360px;overflow-y:auto;">
+          {% for ph in place.photos %}
+            <div class="photo-card">
+              {% if ph.local_path %}
+                <img src="/media/photos/{{ place.cid }}/{{ ph.local_path.split('\\')[-1].split('/')[-1] }}" alt="Local photo" loading="lazy">
+              {% else %}
+                <img src="{{ ph.photo_url }}" alt="Thumbnail photo" loading="lazy">
+              {% endif %}
+              {% if ph.attribution %}
+                <div style="font-size:10px;color:var(--text-muted);padding:2px 4px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">{{ ph.attribution }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-dash">No local photos downloaded for this place.</div>
+      {% endif %}
+    </div>
+
+    <!-- 11. Customer Reviews -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge">REV</span>
+        <h3>Customer Reviews ({{ place.reviews | length }})</h3>
+      </div>
+      {% if place.reviews %}
+        <div id="reviewsList" style="display:flex;flex-direction:column;gap:12px;max-height:500px;overflow-y:auto;padding-right:4px;">
+          {% for r in place.reviews %}
+            <div class="review-item">
+              <div class="review-header">
+                <span class="review-author">{{ r.author_name or 'Anonymous' }}</span>
+                <span class="rating-badge rating-high">{{ r.rating }}★</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">{{ r.relative_date or 'Recently' }}</div>
+              <div class="review-text" style="line-height:1.45;">{{ r.text or '—' }}</div>
+              {% if r.owner_response_text %}
+                <div class="owner-reply" style="margin-top:8px;">
+                  <strong style="color:var(--accent-cyan);font-size:11px;">Owner Response:</strong>
+                  <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">{{ r.owner_response_text }}</div>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-dash">No customer reviews recorded.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const PLACE_DATA = {{ place | tojson }};
+
+  function toggleEmpty(show) {
+    const container = document.getElementById("recordContainer");
+    if (show) {
+      container.classList.add("show-empty");
+    } else {
+      container.classList.remove("show-empty");
+    }
+  }
+
+  function copyPlaceJson() {
+    const btn = document.getElementById("copyJsonBtn");
+    navigator.clipboard.writeText(JSON.stringify(PLACE_DATA, null, 2)).then(() => {
+      const orig = btn.innerText;
+      btn.innerText = "✓ Copied!";
+      btn.style.color = "var(--accent-green)";
+      setTimeout(() => {
+        btn.innerText = orig;
+        btn.style.color = "";
+      }, 2000);
+    });
+  }
+
+  function downloadPlaceJson() {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(PLACE_DATA, null, 2));
+    const dlAnchor = document.createElement("a");
+    dlAnchor.setAttribute("href", dataStr);
+    dlAnchor.setAttribute("download", `place_${PLACE_DATA.cid || 'record'}.json`);
+    document.body.appendChild(dlAnchor);
+    dlAnchor.click();
+    dlAnchor.remove();
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    {% if place.popular_times %}
+      if (window.CanvasCharts) {
+        window.CanvasCharts.drawPopularTimes("placePopularTimes", PLACE_DATA.popular_times);
+      }
+    {% endif %}
+  });
+</script>
+<style>
+  .record-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 900px) {
+    .record-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .record-card {
+    padding: 16px 18px;
+  }
+  .card-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .card-section-header h3 {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+  }
+  .section-badge {
+    font-size: 9.5px;
+    font-weight: 800;
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface-hover);
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+  }
+  .record-field-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .field-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 4px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
+    font-size: 12.5px;
+  }
+  .field-row:last-child {
+    border-bottom: none;
+  }
+  .field-label {
+    color: var(--text-muted);
+    font-size: 12px;
+    min-width: 140px;
+  }
+  .field-val {
+    color: var(--text-secondary);
+    text-align: right;
+    word-break: break-word;
+  }
+  /* Empty fields hidden by default */
+  .empty-field {
+    display: none;
+  }
+  .show-empty .empty-field {
+    display: flex;
+  }
+  .toggle-control {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle-control input {
+    display: none;
+  }
+  .toggle-slider {
+    width: 28px;
+    height: 16px;
+    background: var(--bg-surface-hover);
+    border-radius: 10px;
+    position: relative;
+    border: 1px solid var(--border-subtle);
+    transition: all 0.2s;
+  }
+  .toggle-slider::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    top: 1px;
+    left: 2px;
+    transition: all 0.2s;
+  }
+  .toggle-control input:checked + .toggle-slider {
+    background: var(--accent-cyan-glow);
+    border-color: var(--accent-cyan);
+  }
+  .toggle-control input:checked + .toggle-slider::after {
+    left: 12px;
+    background: var(--accent-cyan);
+  }
+</style>
+{% endblock %}

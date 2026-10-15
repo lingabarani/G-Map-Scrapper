@@ -1,0 +1,140 @@
+# Taxonomy Mapping for Business Verticals
+# Format: vertical_key: list of keywords (matched case-insensitively against raw category)
+# Order matters: first match wins.
+
+healthcare:
+  label: "Healthcare & Medical"
+  keywords:
+    - hospital
+    - clinic
+    - medical
+    - doctor
+    - physician
+    - urgent care
+    - dentist
+    - dental
+    - pharmacy
+    - optometrist
+    - chiropractor
+    - physical therapy
+    - diagnostic
+    - laboratory
+    - health
+
+hospitality:
+  label: "Hospitality & Lodging"
+  keywords:
+    - hotel
+    - motel
+    - hostel
+    - resort
+    - guest house
+    - bed and breakfast
+
+food:
+  label: "Food & Dining"
+  keywords:
+    - restaurant
+    - cafe
+    - coffee
+    - bakery
+    - bar
+    - pub
+    - pizza
+    - fast food
+    - deli
+    - diner
+    - ice cream
+    - food court
+    - juice
+    - tea house
+
+retail:
+  label: "Retail & Shopping"
+  keywords:
+    - store
+    - shop
+    - boutique
+    - supermarket
+    - grocery
+    - convenience
+    - mall
+    - market
+    - pharmacy retail
+    - clothing
+    - electronics
+
+fitness:
+  label: "Fitness & Recreation"
+  keywords:
+    - gym
+    - fitness
+    - yoga
+    - pilates
+    - crossfit
+    - sports centre
+    - swimming
+
+beauty:
+  label: "Beauty & Personal Care"
+  keywords:
+    - salon
+    - barber
+    - spa
+    - nail
+    - hair
+    - tattoo
+    - beauty
+
+automotive:
+  label: "Automotive"
+  keywords:
+    - car repair
+    - auto
+    - garage
+    - petrol
+    - gas station
+    - car wash
+    - dealership
+
+finance:
+  label: "Finance & Banking"
+  keywords:
+    - bank
+    - atm
+    - credit union
+    - insurance
+    - financial
+
+education:
+  label: "Education"
+  keywords:
+    - school
+    - college
+    - university
+    - kindergarten
+    - academy
+    - tuition
+    - library
+
+government:
+  label: "Government & Public Services"
+  keywords:
+    - government
+    - city hall
+    - post office
+    - embassy
+    - courthouse
+    - police
+    - fire station
+
+real_estate:
+  label: "Real Estate"
+  keywords:
+    - real estate
+    - property
+    - estate agent
+
+other:
+  label: "Other"
+  keywords: []

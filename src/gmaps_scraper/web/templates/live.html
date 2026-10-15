@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+
+{% block title %}Live Search & On-Demand Scraper - GMaps Local{% endblock %}
+
+{% block content %}
+<div class="page-container" style="max-width:1440px;margin:0 auto;padding:24px 20px;">
+  
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <h1 style="margin:0;font-size:24px;font-weight:700;color:var(--text-main, #f8fafc);">Live Search & Scrape</h1>
+        <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">
+          STREAMING RPC
+        </span>
+      </div>
+      <p style="margin:4px 0 0 0;color:var(--text-muted, #94a3b8);font-size:13px;">
+        Scrape Google Maps on demand. Streams places into the local database and browser in real time.
+      </p>
+    </div>
+
+    <!-- Active / Recent Jobs Selector -->
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="font-size:12px;color:#94a3b8;">Recent Jobs:</label>
+      <select id="recentJobsSelect" class="input-sm" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:12px;" onchange="LiveSearch.loadExistingJob(this.value)">
+        <option value="">-- Select Past Job --</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="LiveSearch.refreshRecentJobs()" title="Refresh recent jobs">↻</button>
+    </div>
+  </div>
+
+  <!-- One-Box Natural Language Quick Bar -->
+  <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:600;color:#cbd5e1;display:flex;align-items:center;gap:6px;">
+        <span>⚡</span> One-Box Quick Query (Natural Language)
+      </span>
+      <span style="font-size:11px;color:#64748b;">e.g. "hospitals in Chicago", "bakeries in Lyon, France", "gyms near 40.75,-73.98"</span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <input type="text" id="nlInput" class="form-input" style="flex:1;min-width:280px;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:9px 12px;font-size:14px;"
+             placeholder="Type anything (e.g. coffee near Austin, TX or clinics in Tokyo)..."
+             onkeydown="if(event.key==='Enter') LiveSearch.quickSearchAndScrape()">
+      <button class="btn btn-secondary" style="padding:8px 16px;font-weight:600;" onclick="LiveSearch.parseOneBox()">
+        Parse & Fill
+      </button>
+      <button class="btn btn-success" style="padding:8px 18px;font-weight:700;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;" onclick="LiveSearch.quickSearchAndScrape()">
+        ⚡ Quick Scrape
+      </button>
+    </div>
+  </div>
+
+  <!-- Live Search Setup Grid -->
+  <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:20px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-bottom:16px;">
+      
+      <!-- What Input -->
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">
+          WHAT (Business / Category / Keyword) <span style="color:#ef4444;">*</span>
+        </label>
+        <input type="text" id="queryInput" class="form-input" list="categoryDatalist" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:8px 12px;font-size:13px;"
+               placeholder="e.g. hospital, bakery, dental clinic"
+               onkeydown="if(event.key==='Enter') LiveSearch.startScrape()">
+        <datalist id="categoryDatalist">
+          <option value="hospital">
+          <option value="clinic">
+          <option value="pharmacy">
+          <option value="doctor">
+          <option value="dentist">
+          <option value="bakery">
+          <option value="restaurant">
+          <option value="cafe">
+          <option value="supermarket">
+          <option value="gym">
+          <option value="hotel">
+          <option value="lawyer">
+        </datalist>
+      </div>
+
+      <!-- Where Input -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="font-size:12px;font-weight:600;color:#94a3b8;">
+            WHERE (Location / City / Country / BBox) <span style="color:#ef4444;">*</span>
+          </label>
+          <button type="button" class="btn-link" style="font-size:11px;color:#38bdf8;background:none;border:none;cursor:pointer;padding:0;" onclick="LiveSearch.toggleCoordsMode()">
+            <span id="coordsModeLabel">Use Coordinates Mode</span>
+          </button>
+        </div>
+
+        <div id="textLocationContainer">
+          <input type="text" id="locationInput" class="form-input" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:8px 12px;font-size:13px;"
+                 placeholder="e.g. Chicago or Lyon, France or 40.7128,-74.0060@5km"
+                 onkeydown="if(event.key==='Enter') LiveSearch.startScrape()">
+        </div>
+
+        <div id="coordsContainer" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <input type="number" id="coordLat" step="0.0001" placeholder="Lat (e.g. 40.7128)" style="background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+          <input type="number" id="coordLng" step="0.0001" placeholder="Lng (e.g. -74.0060)" style="background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+          <input type="number" id="coordSpan" step="0.001" placeholder="Span deg (e.g. 0.05)" style="background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible Advanced Options -->
+    <details style="margin-bottom:16px;">
+      <summary style="font-size:12px;color:#94a3b8;cursor:pointer;user-select:none;font-weight:600;">
+        ⚙ Advanced Options & Limits
+      </summary>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;padding-top:12px;border-top:1px solid #334155;margin-top:8px;">
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">Max Places (Cap)</label>
+          <input type="number" id="optMaxPlaces" value="200" min="10" max="1000" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">Max Reviews / Place</label>
+          <input type="number" id="optMaxReviews" value="50" min="0" max="200" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">Max Tiling Depth</label>
+          <input type="number" id="optMaxDepth" value="3" min="1" max="4" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">Span Override (Deg)</label>
+          <input type="number" id="optSpanOverride" step="0.001" placeholder="Auto" style="width:100%;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;padding:6px 8px;font-size:12px;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">
+          <label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="optEnrich" checked> Enrich Details (Hours, Attributes)
+          </label>
+          <label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="optReviews" checked> Extract User Reviews
+          </label>
+          <label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="optPhotos"> Download Place Photos
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <!-- Action Bar -->
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <button id="btnMainStart" class="btn btn-success" style="padding:10px 24px;font-weight:700;font-size:14px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;" onclick="LiveSearch.startScrape()">
+        <span>🚀</span> Start Live Scrape
+      </button>
+
+      <button id="btnResolve" class="btn btn-secondary" style="padding:9px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px;" onclick="LiveSearch.resolveLocation()">
+        <span>📍</span> Preview & Resolve Location
+      </button>
+
+      <span id="resolveStatusText" style="font-size:13px;color:#94a3b8;"></span>
+    </div>
+  </div>
+
+  <!-- Resolution Confirmation Card (Appears after resolving) -->
+  <div id="confirmationCard" class="card" style="display:none;background:#0f172a;border:1px solid #3b82f6;border-radius:10px;padding:20px;margin-bottom:20px;box-shadow:0 4px 20px rgba(59,130,246,0.15);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
+      <div style="flex:1;min-width:280px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:18px;">🎯</span>
+          <h3 id="resolvedTitle" style="margin:0;font-size:18px;font-weight:700;color:#f8fafc;">Resolved: Lyon, France</h3>
+          <span id="resolvedBadge" class="badge" style="background:#1e3a8a;color:#93c5fd;font-size:11px;padding:2px 8px;border-radius:10px;">city</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin:12px 0;">
+          <div style="background:#1e293b;padding:8px 12px;border-radius:6px;">
+            <div style="font-size:11px;color:#94a3b8;">Coordinates</div>
+            <div id="resolvedCoords" style="font-size:13px;font-weight:600;color:#f1f5f9;font-family:monospace;">(45.7640, 4.8357)</div>
+          </div>
+          <div style="background:#1e293b;padding:8px 12px;border-radius:6px;">
+            <div style="font-size:11px;color:#94a3b8;">Coverage Span</div>
+            <div id="resolvedSpan" style="font-size:13px;font-weight:600;color:#f1f5f9;">0.10° (~11 km)</div>
+          </div>
+          <div style="background:#1e293b;padding:8px 12px;border-radius:6px;">
+            <div style="font-size:11px;color:#94a3b8;">Country / Code</div>
+            <div id="resolvedCountry" style="font-size:13px;font-weight:600;color:#f1f5f9;">France (FR)</div>
+          </div>
+          <div style="background:#1e293b;padding:8px 12px;border-radius:6px;">
+            <div style="font-size:11px;color:#94a3b8;">Estimated Requests</div>
+            <div id="resolvedEstimate" style="font-size:13px;font-weight:600;color:#38bdf8;">~216 reqs (~2 min)</div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px;margin-top:16px;">
+          <button id="btnStartScrape" class="btn btn-success" style="padding:10px 24px;font-weight:700;font-size:14px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;" onclick="LiveSearch.startScrape()">
+            🚀 Start Live Scrape
+          </button>
+          <button class="btn btn-secondary" style="padding:9px 16px;" onclick="LiveSearch.dismissConfirmation()">
+            Dismiss
+          </button>
+        </div>
+      </div>
+
+      <!-- Mini Preview Canvas Map -->
+      <div style="width:240px;height:160px;background:#1e293b;border-radius:8px;border:1px solid #334155;overflow:hidden;position:relative;">
+        <canvas id="previewMapCanvas" width="240" height="160" style="width:100%;height:100%;display:block;"></canvas>
+        <div style="position:absolute;bottom:4px;right:6px;font-size:10px;color:#64748b;background:rgba(15,23,42,0.8);padding:1px 4px;border-radius:3px;">
+          area preview
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Execution Dashboard (Shown when active job running or completed) -->
+  <div id="executionDashboard" style="display:none;">
+    
+    <!-- Status & Progress Ribbon -->
+    <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px 20px;margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span id="jobPulseDot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;animation:pulse 1.5s infinite;"></span>
+          <span id="jobStatusBadge" class="badge" style="background:#065f46;color:#6ee7b7;font-size:12px;font-weight:700;padding:4px 10px;border-radius:12px;">
+            DISCOVERING
+          </span>
+          <span id="jobCurrentQuery" style="font-size:14px;font-weight:600;color:#f8fafc;">
+            Query: "hospital" in Chicago, IL
+          </span>
+        </div>
+
+        <!-- Cancel / Export Controls -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button id="btnCancelJob" class="btn btn-danger btn-sm" style="background:#ef4444;color:#fff;border:none;padding:6px 14px;font-weight:600;border-radius:6px;cursor:pointer;" onclick="LiveSearch.cancelJob()">
+            ⏹ Stop Scrape
+          </button>
+          
+          <div id="finishedActions" style="display:none;display:inline-flex;gap:6px;">
+            <a id="btnViewPlaces" href="/places" class="btn btn-primary btn-sm" style="font-size:12px;text-decoration:none;padding:6px 12px;font-weight:600;">
+              🔍 Browse Places
+            </a>
+            <button class="btn btn-secondary btn-sm" onclick="LiveSearch.exportCsv()">Export CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="LiveSearch.exportJson()">Export JSON</button>
+            <button class="btn btn-secondary btn-sm" onclick="LiveSearch.copyJson()">Copy JSON</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage Stepper -->
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:4px;">
+        <div id="step-queued" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">1. Queued</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-resolving" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">2. Resolving</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-discovering" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">3. Tiling & Discover</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-enriching" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">4. Details</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-reviews" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">5. Reviews</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-photos" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">6. Photos</div>
+        <span style="color:#475569;">→</span>
+        <div id="step-done" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">7. Complete</div>
+      </div>
+
+      <!-- Live Counters Cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;">
+        <div style="background:#0f172a;padding:10px 14px;border-radius:8px;border:1px solid #334155;">
+          <div style="font-size:11px;color:#94a3b8;">Places Found</div>
+          <div style="display:flex;align-items:baseline;gap:6px;">
+            <span id="counterPlaces" style="font-size:22px;font-weight:800;color:#f8fafc;">0</span>
+            <span id="counterNewBadge" style="font-size:11px;color:#10b981;">(0 new)</span>
+          </div>
+        </div>
+        <div style="background:#0f172a;padding:10px 14px;border-radius:8px;border:1px solid #334155;">
+          <div style="font-size:11px;color:#94a3b8;">Reviews Fetched</div>
+          <div id="counterReviews" style="font-size:22px;font-weight:800;color:#38bdf8;">0</div>
+        </div>
+        <div style="background:#0f172a;padding:10px 14px;border-radius:8px;border:1px solid #334155;">
+          <div style="font-size:11px;color:#94a3b8;">Photos Downloaded</div>
+          <div id="counterPhotos" style="font-size:22px;font-weight:800;color:#c084fc;">0</div>
+        </div>
+        <div style="background:#0f172a;padding:10px 14px;border-radius:8px;border:1px solid #334155;">
+          <div style="font-size:11px;color:#94a3b8;">Elapsed Time</div>
+          <div id="counterElapsed" style="font-size:22px;font-weight:800;color:#fbbf24;">0s</div>
+        </div>
+        <div style="background:#0f172a;padding:10px 14px;border-radius:8px;border:1px solid #334155;">
+          <div style="font-size:11px;color:#94a3b8;">Estimated Remaining</div>
+          <div id="counterEta" style="font-size:22px;font-weight:800;color:#94a3b8;">~30s</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Live Workspace: Split Results Table + Live Map -->
+    <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:20px;margin-bottom:20px;align-items:start;">
+      
+      <!-- Live Results Table (Fills in row-by-row) -->
+      <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:15px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">
+            <span>📋</span> Real-Time Discovered Places
+            <span id="placesTableCountBadge" class="badge" style="background:#334155;color:#e2e8f0;font-size:11px;padding:1px 6px;border-radius:8px;">0</span>
+          </h3>
+          <span style="font-size:11px;color:#64748b;">Newest places stream to the top</span>
+        </div>
+
+        <div style="max-height:460px;overflow-y:auto;border:1px solid #334155;border-radius:6px;">
+          <table class="data-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead style="position:sticky;top:0;background:#0f172a;z-index:2;border-bottom:1px solid #334155;">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;color:#94a3b8;">Place Name</th>
+                <th style="padding:8px 10px;text-align:left;color:#94a3b8;">Vertical</th>
+                <th style="padding:8px 10px;text-align:left;color:#94a3b8;">Rating</th>
+                <th style="padding:8px 10px;text-align:left;color:#94a3b8;">Address</th>
+                <th style="padding:8px 10px;text-align:left;color:#94a3b8;">Phone</th>
+              </tr>
+            </thead>
+            <tbody id="livePlacesTbody">
+              <tr id="emptyTableRow">
+                <td colspan="5" style="text-align:center;padding:40px 10px;color:#64748b;">
+                  Waiting for place listings to land from Google Maps RPC...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Live Coordinate Canvas Map -->
+      <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:15px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">
+            <span>🗺️</span> Spatial Plot (Canvas)
+          </h3>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm" onclick="LiveSearch.resetLiveMap()">Center</button>
+          </div>
+        </div>
+
+        <div style="width:100%;height:460px;background:#0f172a;border-radius:6px;border:1px solid #334155;position:relative;overflow:hidden;">
+          <canvas id="liveMapCanvas" width="540" height="460" style="width:100%;height:100%;display:block;cursor:crosshair;"></canvas>
+          <div id="liveMapTooltip" style="display:none;position:absolute;background:rgba(15,23,42,0.95);border:1px solid #38bdf8;padding:6px 10px;border-radius:6px;font-size:11px;color:#fff;pointer-events:none;z-index:10;max-width:200px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Event Log Console Tail -->
+    <div class="card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:600;color:#94a3b8;display:flex;align-items:center;gap:6px;">
+          <span>📟</span> Live Event Stream Tail (SSE)
+        </span>
+        <button class="btn-link" style="font-size:11px;color:#64748b;background:none;border:none;cursor:pointer;" onclick="document.getElementById('liveLogTail').innerHTML=''">
+          Clear Log
+        </button>
+      </div>
+      <div id="liveLogTail" style="height:120px;overflow-y:auto;background:#090d16;color:#a5f3fc;font-family:monospace;font-size:11px;padding:8px 12px;border-radius:6px;border:1px solid #1e293b;line-height:1.5;">
+        [System] Connected to job engine. Awaiting events...
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/live_search.js"></script>
+{% endblock %}

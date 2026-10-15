@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Spatial Map — GMap Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header" style="margin-bottom:14px;">
+  <div>
+    <h1 class="view-title">Spatial Coordinate Map</h1>
+    <div class="view-subtitle">100% Offline Canvas Coordinate Map with live business vertical &amp; geographic filtering</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button class="btn btn-secondary btn-sm" onclick="if(window.mapInstance) window.mapInstance.resetView();">Reset View</button>
+    <button class="btn btn-secondary btn-sm" id="toggleOsmBtn" onclick="toggleOsmMap()" title="Requires internet connection">
+      🌐 Toggle OSM Tiles <span style="font-size:10px;color:var(--accent-amber);">(Online)</span>
+    </button>
+  </div>
+</div>
+
+<div class="places-container">
+  <!-- Left Filter Rail -->
+  <aside class="filter-rail" id="mapFilterRail">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-subtle);padding-bottom:8px;">
+      <span style="font-weight:700;font-size:13px;color:var(--text-primary);">Map Filters</span>
+      <button class="clear-all-btn" onclick="clearMapFilters()">Clear All</button>
+    </div>
+
+    <!-- Verticals -->
+    <div class="rail-section">
+      <div class="rail-section-header">Vertical</div>
+      <div class="rail-presets-row">
+        <span class="preset-chip" onclick="toggleMapPreset('healthcare')">Healthcare</span>
+        <span class="preset-chip" onclick="toggleMapPreset('food')">Food</span>
+        <span class="preset-chip" onclick="toggleMapPreset('retail')">Retail</span>
+        <span class="preset-chip" onclick="toggleMapPreset('fitness')">Fitness</span>
+      </div>
+      <input
+        type="text"
+        id="mapVerticalSearch"
+        class="rail-search-input"
+        placeholder="Filter verticals..."
+        oninput="filterFacetList('mapVerticalList', this.value)"
+      >
+      <div id="mapVerticalList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Loading facets...</div>
+      </div>
+    </div>
+
+    <!-- Country -->
+    <div class="rail-section">
+      <div class="rail-section-header">Country</div>
+      <input
+        type="text"
+        id="mapCountrySearch"
+        class="rail-search-input"
+        placeholder="Filter countries..."
+        oninput="filterFacetList('mapCountryList', this.value)"
+      >
+      <div id="mapCountryList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Loading facets...</div>
+      </div>
+    </div>
+
+    <!-- City -->
+    <div class="rail-section">
+      <div class="rail-section-header">
+        <span>City</span>
+        <span id="mapCityNotice" style="font-size:10px;color:var(--text-muted);"></span>
+      </div>
+      <input
+        type="text"
+        id="mapCitySearch"
+        class="rail-search-input"
+        placeholder="Filter cities..."
+        oninput="filterFacetList('mapCityList', this.value)"
+      >
+      <div id="mapCityList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Select country first</div>
+      </div>
+    </div>
+
+    <!-- Min Rating -->
+    <div class="rail-section">
+      <div class="rail-section-header">Min Rating</div>
+      <select id="mapMinRating" class="rail-search-input" onchange="fetchMapPoints()">
+        <option value="">Any Rating</option>
+        <option value="4.5">4.5★ &amp; above</option>
+        <option value="4.0">4.0★ &amp; above</option>
+        <option value="3.5">3.5★ &amp; above</option>
+        <option value="3.0">3.0★ &amp; above</option>
+      </select>
+    </div>
+
+    <button onclick="fetchMapPoints()" class="btn btn-primary btn-sm" style="width:100%;justify-content:center;">Apply Map Filters</button>
+  </aside>
+
+  <!-- Map Main Area -->
+  <main style="display:flex;flex-direction:column;gap:10px;min-width:0;">
+    <!-- Active Chips -->
+    <div class="filter-chips-bar" id="mapActiveChips"></div>
+
+    <div class="table-card" style="height:calc(100vh - 220px);min-height:550px;position:relative;overflow:hidden;">
+      <!-- Offline Canvas Map -->
+      <canvas id="scatterMap" style="width:100%;height:100%;display:block;cursor:default;"></canvas>
+
+      <!-- Online Leaflet OSM container (Hidden by default, 100% local compliance) -->
+      <div id="osmMapContainer" style="position:absolute;inset:0;display:none;background:#0c101c;">
+        <div style="padding:16px;background:rgba(244,63,94,0.15);border-bottom:1px solid var(--accent-rose);font-size:12px;color:var(--text-primary);display:flex;justify-content:space-between;align-items:center;">
+          <span>⚠️ <strong>Notice:</strong> OSM Tile rendering requires active internet connection. Click to return to 100% offline Canvas mode.</span>
+          <button class="btn btn-secondary btn-sm" onclick="toggleOsmMap()">Return to Offline Canvas</button>
+        </div>
+        <div id="osmNotice" class="state-box">
+          <div class="state-icon">📡</div>
+          <div class="state-title">Online Map Feature</div>
+          <div style="font-size:12px;max-width:500px;margin:0 auto;">
+            As per the mission constraints, this application runs 100% locally with zero external network requests.
+            The default Canvas Coordinate Map displays all spatial data completely offline.
+          </div>
+        </div>
+      </div>
+
+      <!-- Map Legend / Controls Floating HUD -->
+      <div style="position:absolute;top:16px;right:16px;background:rgba(16,21,34,0.85);backdrop-filter:blur(4px);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 14px;font-size:11.5px;color:var(--text-secondary);pointer-events:none;">
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">Map Controls</div>
+        <div>• <strong>Drag</strong> to Pan</div>
+        <div>• <strong>Scroll Wheel</strong> to Zoom</div>
+        <div>• <strong>Click Pin</strong> to Open Drawer</div>
+        <div style="margin-top:6px;border-top:1px solid var(--border-subtle);padding-top:6px;display:flex;align-items:center;gap:6px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent-green);"></span> 4.5+ Rating
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent-cyan);margin-left:8px;"></span> &lt;4.5 Rating
+        </div>
+        <div id="mapPointCount" style="margin-top:4px;font-size:10.5px;color:var(--accent-cyan);font-family:var(--font-mono);"></div>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let osmActive = false;
+  function toggleOsmMap() {
+    osmActive = !osmActive;
+    const osmCont = document.getElementById("osmMapContainer");
+    const canvas = document.getElementById("scatterMap");
+    if (osmCont && canvas) {
+      osmCont.style.display = osmActive ? "block" : "none";
+      canvas.style.display = osmActive ? "none" : "block";
+    }
+  }
+
+  const mapParams = new URLSearchParams(window.location.search);
+
+  function filterFacetList(containerId, query) {
+    const q = (query || "").toLowerCase().trim();
+    const items = document.querySelectorAll(`#${containerId} .facet-item`);
+    items.forEach(el => {
+      const text = (el.getAttribute("data-label") || "").toLowerCase();
+      el.style.display = text.includes(q) ? "" : "none";
+    });
+  }
+
+  function toggleMapPreset(key) {
+    const current = new Set(mapParams.get("vertical") ? mapParams.get("vertical").split(",") : []);
+    if (current.has(key)) current.delete(key);
+    else current.add(key);
+    if (current.size > 0) mapParams.set("vertical", Array.from(current).join(","));
+    else mapParams.delete("vertical");
+    window.location.search = mapParams.toString();
+  }
+
+  function clearMapFilters() {
+    window.location.href = "/map";
+  }
+
+  async function loadMapFacets() {
+    try {
+      const vRes = await fetch(`/api/verticals?${mapParams.toString()}`);
+      const vData = await vRes.json();
+      const vCont = document.getElementById("mapVerticalList");
+      const activeV = new Set(mapParams.get("vertical") ? mapParams.get("vertical").split(",") : []);
+      vCont.innerHTML = vData.map(f => `
+        <label class="facet-item" data-label="${f.label} ${f.key}">
+          <span class="facet-label-wrap">
+            <input type="checkbox" value="${f.key}" ${activeV.has(f.key) ? 'checked' : ''} onchange="fetchMapPoints()">
+            <span>${f.label}</span>
+          </span>
+          <span class="facet-count">${f.count}</span>
+        </label>
+      `).join("");
+
+      const cRes = await fetch(`/api/countries?${mapParams.toString()}`);
+      const cData = await cRes.json();
+      const cCont = document.getElementById("mapCountryList");
+      const activeC = new Set(mapParams.get("country") ? mapParams.get("country").split(",") : []);
+      cCont.innerHTML = cData.map(f => `
+        <label class="facet-item" data-label="${f.name} ${f.code}">
+          <span class="facet-label-wrap">
+            <input type="checkbox" value="${f.code}" ${activeC.has(f.code) || activeC.has(f.name) ? 'checked' : ''} onchange="fetchMapPoints()">
+            <span>${f.name}</span>
+          </span>
+          <span class="facet-count">${f.count}</span>
+        </label>
+      `).join("");
+
+      const cityCont = document.getElementById("mapCityList");
+      const cityNotice = document.getElementById("mapCityNotice");
+      if (activeC.size > 0) {
+        const countryCode = Array.from(activeC)[0];
+        cityNotice.innerText = `(${countryCode})`;
+        const ciRes = await fetch(`/api/cities?country=${countryCode}&${mapParams.toString()}`);
+        const ciData = await ciRes.json();
+        const activeCi = new Set(mapParams.get("city") ? mapParams.get("city").split(",") : []);
+        cityCont.innerHTML = ciData.map(f => `
+          <label class="facet-item" data-label="${f.city}">
+            <span class="facet-label-wrap">
+              <input type="checkbox" value="${f.city}" ${activeCi.has(f.city) ? 'checked' : ''} onchange="fetchMapPoints()">
+              <span>${f.city}</span>
+            </span>
+            <span class="facet-count">${f.count}</span>
+          </label>
+        `).join("");
+      } else {
+        cityNotice.innerText = "(select country)";
+        cityCont.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">Select country first</div>';
+      }
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  function fetchMapPoints() {
+    const vBoxes = document.querySelectorAll("#mapVerticalList input:checked");
+    const vVals = Array.from(vBoxes).map(b => b.value);
+    if (vVals.length > 0) mapParams.set("vertical", vVals.join(","));
+    else mapParams.delete("vertical");
+
+    const cBoxes = document.querySelectorAll("#mapCountryList input:checked");
+    const cVals = Array.from(cBoxes).map(b => b.value);
+    if (cVals.length > 0) mapParams.set("country", cVals.join(","));
+    else mapParams.delete("country");
+
+    const ciBoxes = document.querySelectorAll("#mapCityList input:checked");
+    const ciVals = Array.from(ciBoxes).map(b => b.value);
+    if (ciVals.length > 0) mapParams.set("city", ciVals.join(","));
+    else mapParams.delete("city");
+
+    const minRating = document.getElementById("mapMinRating").value;
+    if (minRating) mapParams.set("min_rating", minRating);
+    else mapParams.delete("min_rating");
+
+    window.history.replaceState({}, "", `${window.location.pathname}?${mapParams.toString()}`);
+    renderMapChips();
+
+    fetch(`/api/map?${mapParams.toString()}`)
+      .then(res => res.json())
+      .then(data => {
+        if (window.mapInstance) {
+          window.mapInstance.setPoints(data);
+          document.getElementById("mapPointCount").innerText = `${data.length} places plotted`;
+        }
+      });
+  }
+
+  function renderMapChips() {
+    const bar = document.getElementById("mapActiveChips");
+    const chips = [];
+    if (mapParams.get("vertical")) {
+      mapParams.get("vertical").split(",").forEach(v => chips.push({ label: `Vertical: ${v}`, key: "vertical", val: v }));
+    }
+    if (mapParams.get("country")) {
+      mapParams.get("country").split(",").forEach(c => chips.push({ label: `Country: ${c}`, key: "country", val: c }));
+    }
+    if (mapParams.get("city")) {
+      mapParams.get("city").split(",").forEach(ci => chips.push({ label: `City: ${ci}`, key: "city", val: ci }));
+    }
+    if (mapParams.get("min_rating")) {
+      chips.push({ label: `Min Rating: ${mapParams.get("min_rating")}★`, key: "min_rating" });
+    }
+
+    if (chips.length === 0) {
+      bar.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted);">Showing all mapped locations</span>';
+      return;
+    }
+    bar.innerHTML = chips.map(c => `
+      <span class="active-chip">
+        <span>${c.label}</span>
+      </span>
+    `).join("") + '<button class="clear-all-btn" onclick="clearMapFilters()">Clear All</button>';
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    window.mapInstance = new CanvasMap("scatterMap", {
+      onMarkerClick: (item) => {
+        if (item && item.cid) {
+          window.Drawer.open(item.cid);
+        }
+      }
+    });
+
+    renderMapChips();
+    loadMapFacets();
+    fetchMapPoints();
+  });
+</script>
+{% endblock %}

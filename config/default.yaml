@@ -1,0 +1,23 @@
+concurrency: 5
+per_host_rate: 2.0
+max_retries: 3
+backoff_base: 1.5
+tile_base_zoom: 15
+tile_max_depth: 3
+tile_overlap_pct: 10
+max_reviews_per_place: 100
+download_photos: true
+photo_max_width: 800
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+accept_language: "en-US,en;q=0.9"
+hl: "en"
+gl: "us"
+proxies: []
+headless_fallback: false
+db_path: "data/gmaps.sqlite"
+raw_data_dir: "data/raw"
+photos_dir: "data/photos"
+exports_dir: "data/exports"
+logs_dir: "logs"
+web_port: 8765
+web_host: "127.0.0.1"

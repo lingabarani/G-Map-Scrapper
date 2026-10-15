@@ -1,0 +1,20 @@
+# Default spatial spans (in degrees) for classified geographic features
+country:
+  span_deg: 2.0
+  description: "National scope"
+
+state_region:
+  span_deg: 0.5
+  description: "State or province scope"
+
+city:
+  span_deg: 0.10
+  description: "City or metropolitan scope"
+
+district_area:
+  span_deg: 0.03
+  description: "District, borough, neighborhood, or ward scope"
+
+street_address:
+  span_deg: 0.005
+  description: "Street, building, or specific landmark scope"

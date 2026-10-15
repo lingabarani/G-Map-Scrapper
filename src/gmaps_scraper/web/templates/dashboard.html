@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — GMap Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header">
+  <div>
+    <h1 class="view-title">Scraper Overview & Statistics</h1>
+    <div class="view-subtitle">Live health metrics and dataset distribution computed from local SQLite database</div>
+  </div>
+  <div style="display:flex;gap:10px;">
+    <a href="/runs" class="btn btn-secondary btn-sm">Manage Runs</a>
+    <a href="/places" class="btn btn-primary btn-sm">Browse Places &rarr;</a>
+  </div>
+</div>
+
+<!-- Live Search Quick Bar -->
+<div class="card"
+  style="background:#1e293b;border:1px solid rgba(56,189,248,0.3);border-radius:10px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:300px;">
+    <span style="font-size:16px;">⚡</span>
+    <input type="text" id="dashQuickInput"
+      placeholder="Live search on-demand: e.g. hospitals in Chicago or bakeries in Lyon, France..."
+      style="flex:1;background:#0f172a;border:1px solid #334155;color:#fff;border-radius:6px;padding:7px 12px;font-size:13px;"
+      onkeydown="if(event.key==='Enter'){const v=this.value.trim();if(v)location.href='/live?q='+encodeURIComponent(v);}">
+  </div>
+  <button class="btn btn-primary btn-sm"
+    onclick="const v=document.getElementById('dashQuickInput').value.trim(); if(v) location.href='/live?q='+encodeURIComponent(v);">
+    Launch Live Search &rarr;
+  </button>
+</div>
+
+<!-- KPI Status Cards -->
+<div class="stats-grid">
+  <div class="stat-card accent-cyan">
+    <div class="stat-label">Total Places</div>
+    <div class="stat-value">{{ stats.total_places }}</div>
+    <div class="stat-sub">Discovered in grid</div>
+  </div>
+
+  <div class="stat-card accent-green">
+    <div class="stat-label">Enriched Places</div>
+    <div class="stat-value">{{ stats.enriched_places }}</div>
+    <div class="stat-sub">
+      {% if stats.total_places > 0 %}
+      {{ (stats.enriched_places / stats.total_places * 100) | round(1) }}% completed
+      {% else %}
+      0% completed
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stat-card accent-purple">
+    <div class="stat-label">Total Reviews</div>
+    <div class="stat-value">{{ stats.total_reviews }}</div>
+    <div class="stat-sub">Extracted comments</div>
+  </div>
+
+  <div class="stat-card accent-amber">
+    <div class="stat-label">Local Photos</div>
+    <div class="stat-value">{{ stats.total_photos }}</div>
+    <div class="stat-sub">Stored in data/photos/</div>
+  </div>
+
+  <div class="stat-card accent-rose">
+    <div class="stat-label">Failed Places</div>
+    <div class="stat-value">{{ stats.failed_places }}</div>
+    <div class="stat-sub">
+      {% if stats.failed_places > 0 %}
+      <a href="/quality" style="color:var(--accent-rose);text-decoration:none;">View & Retry &rarr;</a>
+      {% else %}
+      0 errors recorded
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label">Last Run</div>
+    <div class="stat-value" style="font-size:16px;margin:8px 0;">
+      {% if stats.last_run %}
+      <span class="badge badge-status-{{ stats.last_run.status }}">{{ stats.last_run.status | upper }}</span>
+      {% else %}
+      <span class="empty-dash">—</span>
+      {% endif %}
+    </div>
+    <div class="stat-sub mono-col">
+      {% if stats.last_run %}
+      {{ stats.last_run.query or 'search' }} ({{ stats.last_run.start_time[:16] }})
+      {% else %}
+      No runs recorded
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Charts Section -->
+<div class="dashboard-charts">
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Rating Distribution (1 to 5 Stars)</div>
+      <span style="font-size:11px;color:var(--text-muted);">Canvas Histogram</span>
+    </div>
+    <div class="canvas-container" style="height:220px;">
+      <canvas id="ratingChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Top Categories</div>
+      <span style="font-size:11px;color:var(--text-muted);">Frequency</span>
+    </div>
+    <div class="canvas-container" style="height:220px;">
+      <canvas id="categoriesChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Status Breakdown -->
+<div class="table-card" style="padding:16px 20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h3 style="font-size:13px;font-weight:600;color:var(--text-primary);">Pipeline Status Breakdown</h3>
+    <span style="font-size:11px;color:var(--text-muted);">Direct from SQLite `places`</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;">
+    {% for status, count in stats.status_breakdown.items() %}
+    <div
+      style="background:var(--bg-surface);padding:8px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);display:flex;gap:10px;align-items:center;">
+      <span class="badge badge-status-{{ status }}">{{ status }}</span>
+      <span style="font-family:var(--font-mono);font-weight:700;">{{ count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const ratingDist = {{ stats.rating_distribution | tojson
+  }};
+  const topCats = {{ stats.top_categories | tojson }};
+
+  if (window.CanvasCharts) {
+    window.CanvasCharts.drawRatingHistogram("ratingChart", ratingDist);
+    window.CanvasCharts.drawCategoriesChart("categoriesChart", topCats);
+  }
+  });
+</script>
+{% endblock %}

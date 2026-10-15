@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline Runs &amp; Logs — GMap Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header">
+  <div>
+    <h1 class="view-title">Pipeline Execution &amp; Live Monitoring</h1>
+    <div class="view-subtitle">Trigger scrapers, watch real-time step counters and stream live logs without leaving localhost</div>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-primary btn-sm" onclick="triggerAction('resume')">▶ Resume Run</button>
+    <button class="btn btn-secondary btn-sm" onclick="triggerAction('retry-failed')">↺ Retry Failed</button>
+  </div>
+</div>
+
+<!-- Trigger Pipeline Actions Card -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+  <h3 class="drawer-section-title">Trigger Pipeline Actions</h3>
+  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+    <button class="btn btn-secondary" onclick="triggerRun('search')">1. Tile Discovery (Search)</button>
+    <button class="btn btn-secondary" onclick="triggerRun('enrich')">2. Enrich Details</button>
+    <button class="btn btn-secondary" onclick="triggerRun('reviews')">3. Fetch Reviews</button>
+    <button class="btn btn-secondary" onclick="triggerRun('photos')">4. Download Photos</button>
+    <button class="btn btn-secondary" onclick="triggerRun('export')">5. Export Data</button>
+    <button class="btn btn-primary" onclick="triggerRun('full')">⚡ Run Full Pipeline</button>
+  </div>
+</div>
+
+<!-- Live Run Progress Card -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <h3 style="font-size:14px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+        Active Run Status:
+        <span id="runStatusBadge" class="badge badge-status-pending">IDLE</span>
+      </h3>
+      <div id="runStepSub" style="font-size:12px;color:var(--text-muted);margin-top:2px;">No active scraper process</div>
+    </div>
+    <div id="etaDisplay" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-cyan);">
+      ETA: —
+    </div>
+  </div>
+
+  <div class="progress-bar-wrap">
+    <div id="progressBar" class="progress-bar-fill" style="width: 0%;"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-top:14px;">
+    <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Discovered</div>
+      <div id="cntDiscovered" style="font-family:var(--font-mono);font-size:16px;font-weight:700;">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Enriched</div>
+      <div id="cntEnriched" style="font-family:var(--font-mono);font-size:16px;font-weight:700;">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Reviews</div>
+      <div id="cntReviews" style="font-family:var(--font-mono);font-size:16px;font-weight:700;">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Photos</div>
+      <div id="cntPhotos" style="font-family:var(--font-mono);font-size:16px;font-weight:700;">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Errors</div>
+      <div id="cntErrors" style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent-rose);">0</div>
+    </div>
+  </div>
+</div>
+
+<!-- Live Log Tail Terminal -->
+<div class="table-card" style="padding:16px 20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <h3 style="font-size:13px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;">
+      <span>Live Log Tail</span>
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(logs/gmaps.log)</span>
+    </h3>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-secondary btn-sm" onclick="fetchLogs()">Refresh</button>
+      <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="checkbox" id="autoScrollCheck" checked> Auto-scroll
+      </label>
+    </div>
+  </div>
+  <div id="logTerminal" class="terminal-card">Connecting to local log stream...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function triggerAction(action) {
+    fetch(`/api/${action}`, { method: "POST" })
+      .then(res => res.json())
+      .then(data => {
+        pollProgress();
+        fetchLogs();
+      });
+  }
+
+  function triggerRun(action) {
+    fetch(`/api/run/${action}`, { method: "POST" })
+      .then(res => res.json())
+      .then(data => {
+        pollProgress();
+        fetchLogs();
+      });
+  }
+
+  function pollProgress() {
+    fetch("/api/progress")
+      .then(res => res.json())
+      .then(data => {
+        const badge = document.getElementById("runStatusBadge");
+        const step = document.getElementById("runStepSub");
+        const bar = document.getElementById("progressBar");
+        const eta = document.getElementById("etaDisplay");
+
+        if (badge) {
+          badge.textContent = (data.status || "IDLE").toUpperCase();
+          badge.className = `badge badge-status-${data.status || 'pending'}`;
+        }
+        if (step) {
+          step.textContent = data.current_step ? `Current step: ${data.current_step}` : "Idle";
+        }
+        if (document.getElementById("cntDiscovered")) document.getElementById("cntDiscovered").textContent = data.total_discovered || 0;
+        if (document.getElementById("cntEnriched")) document.getElementById("cntEnriched").textContent = data.total_enriched || 0;
+        if (document.getElementById("cntReviews")) document.getElementById("cntReviews").textContent = data.total_reviews || 0;
+        if (document.getElementById("cntPhotos")) document.getElementById("cntPhotos").textContent = data.total_photos || 0;
+        if (document.getElementById("cntErrors")) document.getElementById("cntErrors").textContent = data.errors_count || 0;
+
+        if (data.total_discovered > 0) {
+          const pct = Math.min(100, Math.round(((data.total_enriched || 0) / data.total_discovered) * 100));
+          if (bar) bar.style.width = pct + "%";
+        } else {
+          if (bar) bar.style.width = data.status === "completed" ? "100%" : "0%";
+        }
+
+        if (eta) {
+          eta.textContent = data.eta_seconds != null ? `ETA: ~${Math.round(data.eta_seconds)}s` : "ETA: —";
+        }
+      });
+  }
+
+  function fetchLogs() {
+    fetch("/api/logs?tail=150")
+      .then(res => res.json())
+      .then(data => {
+        const term = document.getElementById("logTerminal");
+        if (term) {
+          term.textContent = data.logs || "No logs generated yet. Trigger a run or launch CLI to populate.";
+          const check = document.getElementById("autoScrollCheck");
+          if (check && check.checked) {
+            term.scrollTop = term.scrollHeight;
+          }
+        }
+      });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    pollProgress();
+    fetchLogs();
+    setInterval(pollProgress, 1500);
+    setInterval(fetchLogs, 3000);
+  });
+</script>
+{% endblock %}

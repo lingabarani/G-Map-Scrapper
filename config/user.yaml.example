@@ -1,0 +1,5 @@
+# Copy this file to user.yaml to override default settings
+concurrency: 8
+per_host_rate: 3.0
+max_reviews_per_place: 50
+download_photos: false

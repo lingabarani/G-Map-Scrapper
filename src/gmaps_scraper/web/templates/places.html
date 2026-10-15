@@ -1,0 +1,777 @@
+{% extends "base.html" %}
+
+{% block title %}Places Explorer — GMap Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header" style="margin-bottom:14px;">
+  <div>
+    <h1 class="view-title">Places Explorer</h1>
+    <div class="view-subtitle">Faceted local business directory with real-time taxonomy filtering &amp; full data grid</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <!-- Column view toggle & picker -->
+    <button id="toggleColumnsBtn" class="btn btn-secondary btn-sm" onclick="toggleAllColumns()">
+      ⇄ Show All Columns
+    </button>
+    <div class="picker-container">
+      <button id="colPickerBtn" class="btn btn-secondary btn-sm" onclick="toggleColPicker()">
+        Columns ▾
+      </button>
+      <div id="colPickerDropdown" class="picker-dropdown">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:11px;">Select Visible Columns</strong>
+          <span style="font-size:10px;color:var(--accent-cyan);cursor:pointer;" onclick="resetColumns()">Reset</span>
+        </div>
+        <!-- Groups -->
+        <div class="picker-group-title">Identity</div>
+        <label class="picker-item"><input type="checkbox" data-col="name" checked disabled> Name (Sticky)</label>
+        <label class="picker-item"><input type="checkbox" data-col="cid" onchange="onColChange(this)"> CID</label>
+        <label class="picker-item"><input type="checkbox" data-col="place_id" onchange="onColChange(this)"> Place ID</label>
+        <label class="picker-item"><input type="checkbox" data-col="ftid" onchange="onColChange(this)"> FTID</label>
+
+        <div class="picker-group-title">Location</div>
+        <label class="picker-item"><input type="checkbox" data-col="address" checked onchange="onColChange(this)"> Address</label>
+        <label class="picker-item"><input type="checkbox" data-col="city" checked onchange="onColChange(this)"> City</label>
+        <label class="picker-item"><input type="checkbox" data-col="region" onchange="onColChange(this)"> State / Region</label>
+        <label class="picker-item"><input type="checkbox" data-col="country" checked onchange="onColChange(this)"> Country</label>
+        <label class="picker-item"><input type="checkbox" data-col="postal_code" onchange="onColChange(this)"> Postal Code</label>
+        <label class="picker-item"><input type="checkbox" data-col="coords" onchange="onColChange(this)"> Coordinates</label>
+
+        <div class="picker-group-title">Taxonomy</div>
+        <label class="picker-item"><input type="checkbox" data-col="vertical" checked onchange="onColChange(this)"> Vertical</label>
+        <label class="picker-item"><input type="checkbox" data-col="category" checked onchange="onColChange(this)"> Primary Category</label>
+        <label class="picker-item"><input type="checkbox" data-col="vertical_raw" onchange="onColChange(this)"> Raw Category</label>
+
+        <div class="picker-group-title">Contact</div>
+        <label class="picker-item"><input type="checkbox" data-col="phone" checked onchange="onColChange(this)"> Phone</label>
+        <label class="picker-item"><input type="checkbox" data-col="website" checked onchange="onColChange(this)"> Website</label>
+
+        <div class="picker-group-title">Metrics &amp; Status</div>
+        <label class="picker-item"><input type="checkbox" data-col="rating" checked onchange="onColChange(this)"> Rating</label>
+        <label class="picker-item"><input type="checkbox" data-col="review_count" checked onchange="onColChange(this)"> Review Count</label>
+        <label class="picker-item"><input type="checkbox" data-col="status" checked onchange="onColChange(this)"> Status</label>
+      </div>
+    </div>
+
+    <!-- Export Controls -->
+    <div style="display:flex;align-items:center;gap:6px;margin-left:8px;border-left:1px solid var(--border-subtle);padding-left:12px;">
+      <label style="font-size:11.5px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="checkbox" id="fullExportCheckbox" onchange="updateExportLinks()"> Full Schema
+      </label>
+      <a href="#" id="exportCsvBtn" class="btn btn-secondary btn-sm">CSV</a>
+      <a href="#" id="exportJsonlBtn" class="btn btn-secondary btn-sm">JSONL</a>
+      <a href="#" id="exportParquetBtn" class="btn btn-secondary btn-sm">Parquet</a>
+    </div>
+  </div>
+</div>
+
+<!-- Live Search Quick Bar -->
+<div class="card" style="background:#1e293b;border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+  <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:280px;">
+    <span style="font-size:15px;">⚡</span>
+    <input type="text" id="placesLiveQuickInput" placeholder="Live search: e.g. hospitals in Chicago or cafes in Paris..." style="flex:1;background:#0f172a;border:1px solid #334155;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;" onkeydown="if(event.key==='Enter'){const v=this.value.trim();if(v)location.href='/live?q='+encodeURIComponent(v);}">
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="const v=document.getElementById('placesLiveQuickInput').value.trim(); if(v) location.href='/live?q='+encodeURIComponent(v);">
+    Launch Live Search &rarr;
+  </button>
+</div>
+
+<!-- Layout: Left Filter Rail + Main Grid -->
+<div class="places-container">
+  
+  <!-- Left Filter Rail -->
+  <aside class="filter-rail" id="filterRail">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-subtle);padding-bottom:8px;">
+      <span style="font-weight:700;font-size:13px;color:var(--text-primary);">Filters</span>
+      <button class="clear-all-btn" onclick="clearAllFilters()">Clear All</button>
+    </div>
+
+    <!-- Free Text Search -->
+    <div class="rail-section">
+      <div class="rail-section-header">Search</div>
+      <input
+        type="text"
+        id="railSearchInput"
+        class="rail-search-input"
+        placeholder="Keyword, address, phone..."
+        value="{{ filters.q or '' }}"
+        onkeydown="if(event.key==='Enter') applyFilters()"
+      >
+    </div>
+
+    <!-- 1. Vertical Section -->
+    <div class="rail-section">
+      <div class="rail-section-header">
+        <span>Vertical</span>
+      </div>
+      <!-- Quick Presets -->
+      <div class="rail-presets-row">
+        <span class="preset-chip" onclick="togglePreset('healthcare')">Healthcare</span>
+        <span class="preset-chip" onclick="togglePreset('food')">Food</span>
+        <span class="preset-chip" onclick="togglePreset('retail')">Retail</span>
+        <span class="preset-chip" onclick="togglePreset('fitness')">Fitness</span>
+      </div>
+      <input
+        type="text"
+        id="verticalSearch"
+        class="rail-search-input"
+        placeholder="Filter verticals..."
+        oninput="filterFacetList('verticalList', this.value)"
+      >
+      <div id="verticalList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Loading facets...</div>
+      </div>
+    </div>
+
+    <!-- 2. Country Section -->
+    <div class="rail-section">
+      <div class="rail-section-header">
+        <span>Country</span>
+      </div>
+      <input
+        type="text"
+        id="countrySearch"
+        class="rail-search-input"
+        placeholder="Filter countries..."
+        oninput="filterFacetList('countryList', this.value)"
+      >
+      <div id="countryList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Loading facets...</div>
+      </div>
+    </div>
+
+    <!-- 3. City Section (Dependent on Country) -->
+    <div class="rail-section">
+      <div class="rail-section-header">
+        <span>City</span>
+        <span id="cityNotice" style="font-size:10px;color:var(--text-muted);text-transform:none;"></span>
+      </div>
+      <input
+        type="text"
+        id="citySearch"
+        class="rail-search-input"
+        placeholder="Filter cities..."
+        oninput="filterFacetList('cityList', this.value)"
+      >
+      <div id="cityList" class="facet-scroll-list">
+        <div style="color:var(--text-muted);font-size:11px;padding:4px;">Select a country first</div>
+      </div>
+    </div>
+
+    <!-- 4. Quality & Amenities -->
+    <div class="rail-section">
+      <div class="rail-section-header">Attributes &amp; State</div>
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:12px;">
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasReviews" {% if filters.has_reviews is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Customer Reviews</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasHours" {% if filters.has_hours is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Hours Listed</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasAttributes" {% if filters.has_attributes is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Attributes / Amenities</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasPhone" {% if filters.has_phone is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Phone</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasWebsite" {% if filters.has_website is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Website</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkHasPhotos" {% if filters.has_photos is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Has Local Photos</span>
+          </span>
+        </label>
+        <label class="facet-item">
+          <span class="facet-label-wrap">
+            <input type="checkbox" id="chkClaimed" {% if filters.claimed is sameas true %}checked{% endif %} onchange="applyFilters()">
+            <span>Verified / Claimed</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Rating & Status dropdowns -->
+    <div class="rail-section">
+      <div class="rail-section-header">Min Rating &amp; Sort</div>
+      <select id="railMinRating" class="rail-search-input" onchange="applyFilters()">
+        <option value="">Min Rating: Any</option>
+        <option value="4.5" {% if filters.min_rating == 4.5 %}selected{% endif %}>4.5★ &amp; above</option>
+        <option value="4.0" {% if filters.min_rating == 4.0 %}selected{% endif %}>4.0★ &amp; above</option>
+        <option value="3.5" {% if filters.min_rating == 3.5 %}selected{% endif %}>3.5★ &amp; above</option>
+        <option value="3.0" {% if filters.min_rating == 3.0 %}selected{% endif %}>3.0★ &amp; above</option>
+      </select>
+      <select id="railSort" class="rail-search-input" onchange="applyFilters()">
+        <option value="rating_desc" {% if sort == 'rating_desc' %}selected{% endif %}>Sort: Rating (High to Low)</option>
+        <option value="rating_asc" {% if sort == 'rating_asc' %}selected{% endif %}>Sort: Rating (Low to High)</option>
+        <option value="reviews_desc" {% if sort == 'reviews_desc' %}selected{% endif %}>Sort: Most Reviews</option>
+        <option value="name_asc" {% if sort == 'name_asc' %}selected{% endif %}>Sort: Name (A-Z)</option>
+        <option value="created_desc" {% if sort == 'created_desc' %}selected{% endif %}>Sort: Newest First</option>
+      </select>
+    </div>
+
+    <button onclick="applyFilters()" class="btn btn-primary btn-sm" style="width:100%;justify-content:center;">Apply Filters</button>
+  </aside>
+
+  <!-- Main Content Area -->
+  <main style="display:flex;flex-direction:column;gap:10px;min-width:0;">
+    
+    <!-- Active Filter Chips Bar -->
+    <div class="filter-chips-bar" id="activeChipsBar">
+      <!-- Generated via JavaScript -->
+    </div>
+
+    <!-- Data Table Card -->
+    <div class="table-card">
+      <div class="table-wrap full-data-mode" id="placesTableWrap">
+        <table class="data-table" id="placesTable">
+          <thead>
+            <tr>
+              <th class="sticky-name-col" data-col="name">Name</th>
+              <th data-col="rating">Rating</th>
+              <th data-col="review_count">Reviews</th>
+              <th data-col="vertical">Vertical</th>
+              <th data-col="category">Google Category</th>
+              <th data-col="vertical_raw">Raw Category</th>
+              <th data-col="city">City</th>
+              <th data-col="region">Region</th>
+              <th data-col="country">Country</th>
+              <th data-col="postal_code">Postal</th>
+              <th data-col="address">Address</th>
+              <th data-col="coords">Coords</th>
+              <th data-col="phone">Phone</th>
+              <th data-col="website">Website</th>
+              <th data-col="cid">CID</th>
+              <th data-col="place_id">Place ID</th>
+              <th data-col="ftid">FTID</th>
+              <th data-col="status">Status</th>
+              <th style="text-align:right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if places %}
+              {% for p in places %}
+                <tr data-cid="{{ p.cid }}" onclick="Drawer.open('{{ p.cid }}')">
+                  <!-- Name (Sticky) -->
+                  <td class="sticky-name-col name-col" data-col="name">{{ p.name or '—' }}</td>
+                  
+                  <!-- Rating -->
+                  <td data-col="rating">
+                    {% if p.rating %}
+                      <span class="rating-badge {% if p.rating >= 4.0 %}rating-high{% elif p.rating >= 3.0 %}rating-med{% else %}rating-low{% endif %}">
+                        {{ p.rating }}★
+                      </span>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Review count -->
+                  <td class="mono-col" data-col="review_count">
+                    {{ p.review_count if p.review_count is not none else 0 }}
+                  </td>
+
+                  <!-- Vertical -->
+                  <td data-col="vertical">
+                    {% if p.vertical %}
+                      <span class="badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);">{{ p.vertical }}</span>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Google Category -->
+                  <td data-col="category">
+                    {% if p.category %}
+                      <span class="badge" style="background:var(--bg-surface-hover);color:var(--text-secondary);">{{ p.category }}</span>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Raw Category -->
+                  <td class="mono-col" data-col="vertical_raw">{{ p.vertical_raw or '—' }}</td>
+
+                  <!-- City -->
+                  <td data-col="city">{{ p.city or '—' }}</td>
+
+                  <!-- Region -->
+                  <td data-col="region">{{ p.region or '—' }}</td>
+
+                  <!-- Country -->
+                  <td data-col="country">
+                    {{ p.country or '—' }}
+                    {% if p.country_code and p.country_code != 'unknown' %}
+                      <span class="badge" style="margin-left:4px;">{{ p.country_code }}</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Postal Code -->
+                  <td class="mono-col" data-col="postal_code">{{ p.postal_code or '—' }}</td>
+
+                  <!-- Address -->
+                  <td class="address-col" data-col="address">{{ p.address or '—' }}</td>
+
+                  <!-- Coords -->
+                  <td class="mono-col" data-col="coords">
+                    {% if p.latitude is not none and p.longitude is not none %}
+                      {{ p.latitude | round(4) }}, {{ p.longitude | round(4) }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <!-- Phone -->
+                  <td class="mono-col" data-col="phone">{{ p.phone or '—' }}</td>
+
+                  <!-- Website -->
+                  <td data-col="website">
+                    {% if p.website %}
+                      <a href="{{ p.website }}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--accent-cyan);text-decoration:none;">Link ↗</a>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- CID -->
+                  <td class="mono-col" data-col="cid">{{ p.cid }}</td>
+
+                  <!-- Place ID -->
+                  <td class="mono-col" data-col="place_id">{{ p.place_id or '—' }}</td>
+
+                  <!-- FTID -->
+                  <td class="mono-col" data-col="ftid">{{ p.ftid or '—' }}</td>
+
+                  <!-- Status -->
+                  <td data-col="status">
+                    <span class="badge badge-status-{{ p.status }}">{{ p.status }}</span>
+                  </td>
+
+                  <!-- Action -->
+                  <td style="text-align:right;">
+                    <a href="/places/{{ p.cid }}" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();">Full &rarr;</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="19">
+                  <div class="state-box">
+                    <div class="state-icon">🔍</div>
+                    <div class="state-title">No Places Found</div>
+                    <div style="font-size:12px;margin-bottom:12px;">No records match your active search and filter combinations.</div>
+                    <button onclick="clearAllFilters()" class="btn btn-primary btn-sm">Clear All Filters</button>
+                  </div>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Footer -->
+      <div class="table-footer">
+        <div>
+          Showing <strong>{{ places | length }}</strong> of <strong>{{ total_count }}</strong> places
+        </div>
+        <div class="pagination-controls">
+          {% if page > 1 %}
+            <a href="javascript:goToPage({{ page - 1 }})" class="btn btn-secondary btn-sm">&larr; Prev</a>
+          {% endif %}
+          <span style="font-family:var(--font-mono);font-size:11px;padding:0 8px;">Page {{ page }}</span>
+          {% if (page * page_size) < total_count %}
+            <a href="javascript:goToPage({{ page + 1 }})" class="btn btn-secondary btn-sm">Next &rarr;</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // State from URL
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // Column definitions & local storage persistence
+  const DEFAULT_COLS = ["name", "rating", "review_count", "vertical", "category", "city", "country", "phone", "website", "status"];
+  const ALL_COLS = [
+    "name", "rating", "review_count", "vertical", "category", "vertical_raw",
+    "city", "region", "country", "postal_code", "address", "coords", "phone",
+    "website", "cid", "place_id", "ftid", "status"
+  ];
+
+  function getSavedColumns() {
+    const saved = localStorage.getItem("places_visible_columns");
+    if (saved) {
+      try { return JSON.parse(saved); } catch(e) {}
+    }
+    return DEFAULT_COLS;
+  }
+
+  function applyColumnVisibility() {
+    const visible = new Set(getSavedColumns());
+    ALL_COLS.forEach(col => {
+      const isVisible = visible.has(col) || col === "name";
+      document.querySelectorAll(`[data-col="${col}"]`).forEach(el => {
+        el.style.display = isVisible ? "" : "none";
+      });
+      const chk = document.querySelector(`.picker-dropdown input[data-col="${col}"]`);
+      if (chk) chk.checked = isVisible;
+    });
+
+    const isAll = ALL_COLS.every(c => visible.has(c));
+    const toggleBtn = document.getElementById("toggleColumnsBtn");
+    if (toggleBtn) {
+      toggleBtn.innerText = isAll ? "⇄ Compact Columns" : "⇄ Show All Columns";
+    }
+  }
+
+  function onColChange(el) {
+    const col = el.getAttribute("data-col");
+    const current = new Set(getSavedColumns());
+    if (el.checked) {
+      current.add(col);
+    } else {
+      current.delete(col);
+    }
+    localStorage.setItem("places_visible_columns", JSON.stringify(Array.from(current)));
+    applyColumnVisibility();
+  }
+
+  function toggleAllColumns() {
+    const current = new Set(getSavedColumns());
+    const isAll = ALL_COLS.every(c => current.has(c));
+    if (isAll) {
+      localStorage.setItem("places_visible_columns", JSON.stringify(DEFAULT_COLS));
+    } else {
+      localStorage.setItem("places_visible_columns", JSON.stringify(ALL_COLS));
+    }
+    applyColumnVisibility();
+  }
+
+  function resetColumns() {
+    localStorage.setItem("places_visible_columns", JSON.stringify(DEFAULT_COLS));
+    applyColumnVisibility();
+  }
+
+  function toggleColPicker() {
+    const drop = document.getElementById("colPickerDropdown");
+    drop.classList.toggle("active");
+  }
+
+  document.addEventListener("click", (e) => {
+    const btn = document.getElementById("colPickerBtn");
+    const drop = document.getElementById("colPickerDropdown");
+    if (drop && drop.classList.contains("active") && !drop.contains(e.target) && !btn.contains(e.target)) {
+      drop.classList.remove("active");
+    }
+  });
+
+  // Filter Rail & Facet Management
+  function getActiveFilterValues(paramName) {
+    const val = searchParams.get(paramName);
+    if (!val) return [];
+    return val.split(",").map(s => s.trim()).filter(Boolean);
+  }
+
+  async function loadFacets() {
+    // Current active filters to forward to facet endpoints
+    const activeParams = new URLSearchParams(searchParams);
+    activeParams.delete("page");
+
+    // 1. Verticals
+    try {
+      const res = await fetch(`/api/verticals?${activeParams.toString()}`);
+      const data = await res.json();
+      renderVerticalFacets(data);
+    } catch(err) {
+      console.error("Failed to load vertical facets", err);
+    }
+
+    // 2. Countries
+    try {
+      const res = await fetch(`/api/countries?${activeParams.toString()}`);
+      const data = await res.json();
+      renderCountryFacets(data);
+    } catch(err) {
+      console.error("Failed to load country facets", err);
+    }
+
+    // 3. Cities (Dependent on selected country)
+    const activeCountries = getActiveFilterValues("country");
+    const cityNotice = document.getElementById("cityNotice");
+    const cityList = document.getElementById("cityList");
+    const citySearch = document.getElementById("citySearch");
+
+    if (activeCountries.length > 0) {
+      cityNotice.innerText = `(${activeCountries.join(", ")})`;
+      citySearch.disabled = false;
+      try {
+        const cityParams = new URLSearchParams(activeParams);
+        cityParams.set("country", activeCountries[0]); // Primary country
+        const res = await fetch(`/api/cities?${cityParams.toString()}`);
+        const data = await res.json();
+        renderCityFacets(data);
+      } catch(err) {
+        console.error("Failed to load cities", err);
+      }
+    } else {
+      cityNotice.innerText = "(select country first)";
+      citySearch.disabled = true;
+      cityList.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">Disabled until country is chosen</div>';
+    }
+  }
+
+  function renderVerticalFacets(facets) {
+    const container = document.getElementById("verticalList");
+    const active = new Set(getActiveFilterValues("vertical"));
+    if (!facets || facets.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">No matching verticals</div>';
+      return;
+    }
+    container.innerHTML = facets.map(f => `
+      <label class="facet-item" data-label="${escapeAttr(f.label)} ${escapeAttr(f.key)}">
+        <span class="facet-label-wrap">
+          <input type="checkbox" value="${escapeAttr(f.key)}" ${active.has(f.key) ? 'checked' : ''} onchange="applyFilters()">
+          <span>${escapeHtml(f.label)}</span>
+        </span>
+        <span class="facet-count">${f.count}</span>
+      </label>
+    `).join("");
+  }
+
+  function renderCountryFacets(facets) {
+    const container = document.getElementById("countryList");
+    const active = new Set(getActiveFilterValues("country"));
+    if (!facets || facets.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">No matching countries</div>';
+      return;
+    }
+    container.innerHTML = facets.map(f => {
+      const isChecked = active.has(f.code) || active.has(f.name);
+      return `
+        <label class="facet-item" data-label="${escapeAttr(f.name)} ${escapeAttr(f.code)}">
+          <span class="facet-label-wrap">
+            <input type="checkbox" value="${escapeAttr(f.code)}" ${isChecked ? 'checked' : ''} onchange="applyFilters()">
+            <span>${escapeHtml(f.name)}</span>
+          </span>
+          <span class="facet-count">${f.count}</span>
+        </label>
+      `;
+    }).join("");
+  }
+
+  function renderCityFacets(facets) {
+    const container = document.getElementById("cityList");
+    const active = new Set(getActiveFilterValues("city"));
+    if (!facets || facets.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">No cities found</div>';
+      return;
+    }
+    container.innerHTML = facets.map(f => `
+      <label class="facet-item" data-label="${escapeAttr(f.city)}">
+        <span class="facet-label-wrap">
+          <input type="checkbox" value="${escapeAttr(f.city)}" ${active.has(f.city) ? 'checked' : ''} onchange="applyFilters()">
+          <span>${escapeHtml(f.city)}</span>
+        </span>
+        <span class="facet-count">${f.count}</span>
+      </label>
+    `).join("");
+  }
+
+  function filterFacetList(containerId, query) {
+    const q = (query || "").toLowerCase().trim();
+    const items = document.querySelectorAll(`#${containerId} .facet-item`);
+    items.forEach(el => {
+      const text = (el.getAttribute("data-label") || "").toLowerCase();
+      el.style.display = text.includes(q) ? "" : "none";
+    });
+  }
+
+  function togglePreset(key) {
+    const current = new Set(getActiveFilterValues("vertical"));
+    if (current.has(key)) {
+      current.delete(key);
+    } else {
+      current.add(key);
+    }
+    if (current.size > 0) {
+      searchParams.set("vertical", Array.from(current).join(","));
+    } else {
+      searchParams.delete("vertical");
+    }
+    searchParams.set("page", "1");
+    window.location.search = searchParams.toString();
+  }
+
+  function applyFilters() {
+    const newParams = new URLSearchParams();
+
+    // Text search
+    const q = document.getElementById("railSearchInput").value.trim();
+    if (q) newParams.set("q", q);
+
+    // Verticals
+    const vBoxes = document.querySelectorAll("#verticalList input:checked");
+    const vVals = Array.from(vBoxes).map(b => b.value);
+    if (vVals.length > 0) newParams.set("vertical", vVals.join(","));
+
+    // Countries
+    const cBoxes = document.querySelectorAll("#countryList input:checked");
+    const cVals = Array.from(cBoxes).map(b => b.value);
+    if (cVals.length > 0) newParams.set("country", cVals.join(","));
+
+    // Cities
+    const ciBoxes = document.querySelectorAll("#cityList input:checked");
+    const ciVals = Array.from(ciBoxes).map(b => b.value);
+    if (ciVals.length > 0) newParams.set("city", ciVals.join(","));
+
+    // Boolean flags
+    if (document.getElementById("chkHasReviews").checked) newParams.set("has_reviews", "true");
+    if (document.getElementById("chkHasHours").checked) newParams.set("has_hours", "true");
+    if (document.getElementById("chkHasAttributes").checked) newParams.set("has_attributes", "true");
+    if (document.getElementById("chkHasPhone").checked) newParams.set("has_phone", "true");
+    if (document.getElementById("chkHasWebsite").checked) newParams.set("has_website", "true");
+    if (document.getElementById("chkHasPhotos").checked) newParams.set("has_photos", "true");
+    if (document.getElementById("chkClaimed").checked) newParams.set("claimed", "true");
+
+    // Selects
+    const minRating = document.getElementById("railMinRating").value;
+    if (minRating) newParams.set("min_rating", minRating);
+
+    const sortVal = document.getElementById("railSort").value;
+    if (sortVal && sortVal !== "rating_desc") newParams.set("sort", sortVal);
+
+    newParams.set("page", "1");
+    window.location.search = newParams.toString();
+  }
+
+  function removeFilterKey(key, valueToRemove = null) {
+    if (!valueToRemove) {
+      searchParams.delete(key);
+    } else {
+      const current = searchParams.get(key);
+      if (current) {
+        const parts = current.split(",").map(s => s.trim()).filter(s => s !== valueToRemove);
+        if (parts.length > 0) {
+          searchParams.set(key, parts.join(","));
+        } else {
+          searchParams.delete(key);
+        }
+      }
+    }
+    searchParams.set("page", "1");
+    window.location.search = searchParams.toString();
+  }
+
+  function clearAllFilters() {
+    window.location.href = "/places";
+  }
+
+  function goToPage(page) {
+    searchParams.set("page", page);
+    window.location.search = searchParams.toString();
+  }
+
+  function renderChips() {
+    const bar = document.getElementById("activeChipsBar");
+    const chips = [];
+
+    // Search query
+    if (searchParams.get("q")) {
+      chips.push({ label: `Query: "${searchParams.get("q")}"`, key: "q" });
+    }
+
+    // Verticals
+    getActiveFilterValues("vertical").forEach(v => {
+      chips.push({ label: `Vertical: ${v}`, key: "vertical", val: v });
+    });
+
+    // Countries
+    getActiveFilterValues("country").forEach(c => {
+      chips.push({ label: `Country: ${c}`, key: "country", val: c });
+    });
+
+    // Cities
+    getActiveFilterValues("city").forEach(ci => {
+      chips.push({ label: `City: ${ci}`, key: "city", val: ci });
+    });
+
+    // Booleans
+    if (searchParams.get("has_reviews") === "true") chips.push({ label: "Has Reviews", key: "has_reviews" });
+    if (searchParams.get("has_hours") === "true") chips.push({ label: "Has Hours", key: "has_hours" });
+    if (searchParams.get("has_attributes") === "true") chips.push({ label: "Has Amenities", key: "has_attributes" });
+    if (searchParams.get("has_phone") === "true") chips.push({ label: "Has Phone", key: "has_phone" });
+    if (searchParams.get("has_website") === "true") chips.push({ label: "Has Website", key: "has_website" });
+    if (searchParams.get("has_photos") === "true") chips.push({ label: "Has Photos", key: "has_photos" });
+    if (searchParams.get("claimed") === "true") chips.push({ label: "Verified Only", key: "claimed" });
+    if (searchParams.get("min_rating")) chips.push({ label: `Min ★: ${searchParams.get("min_rating")}`, key: "min_rating" });
+
+    if (chips.length === 0) {
+      bar.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted);">No active filters (showing all places)</span>';
+      return;
+    }
+
+    bar.innerHTML = chips.map(c => `
+      <span class="active-chip">
+        <span>${escapeHtml(c.label)}</span>
+        <span class="chip-remove" onclick="removeFilterKey('${c.key}'${c.val ? `,'${escapeAttr(c.val)}'` : ''})">&times;</span>
+      </span>
+    `).join("") + '<button class="clear-all-btn" onclick="clearAllFilters()">Clear All</button>';
+  }
+
+  function updateExportLinks() {
+    const isFull = document.getElementById("fullExportCheckbox").checked;
+    const baseParams = new URLSearchParams(searchParams);
+    if (isFull) {
+      baseParams.set("full", "true");
+    } else {
+      baseParams.delete("full");
+    }
+
+    ["csv", "jsonl", "parquet"].forEach(fmt => {
+      const p = new URLSearchParams(baseParams);
+      p.set("format", fmt);
+      const btn = document.getElementById(`export${fmt.charAt(0).toUpperCase() + fmt.slice(1)}Btn`);
+      if (btn) btn.href = `/api/export?${p.toString()}`;
+    });
+  }
+
+  function escapeAttr(str) {
+    return String(str || "").replace(/"/g, "&quot;");
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    applyColumnVisibility();
+    renderChips();
+    loadFacets();
+    updateExportLinks();
+
+    // Highlight active preset chips
+    const activeVerts = new Set(getActiveFilterValues("vertical"));
+    document.querySelectorAll(".preset-chip").forEach(chip => {
+      if (activeVerts.has(chip.innerText.toLowerCase())) {
+        chip.classList.add("active");
+      }
+    });
+  });
+</script>
+{% endblock %}

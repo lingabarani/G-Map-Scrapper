@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Data Quality Audit — GMap Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header">
+  <div>
+    <h1 class="view-title">Data Quality &amp; Integrity Audit</h1>
+    <div class="view-subtitle">Automated inspection for null values, duplicates, coordinate anomalies and failed scraping rows</div>
+  </div>
+  <div>
+    <button class="btn btn-secondary btn-sm" onclick="retryFailed()">↺ Retry Failed Rows ({{ quality.failed_rows | length }})</button>
+  </div>
+</div>
+
+<!-- Per-Column Null Counts -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+  <h3 class="drawer-section-title">Field Completeness &amp; Null Counts</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;">
+    {% for col, null_cnt in quality.null_counts.items() %}
+      <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">{{ col }}</div>
+        <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;margin:4px 0;">{{ null_cnt }}</div>
+        <div style="font-size:10.5px;color:var(--text-secondary);">
+          {% if quality.total > 0 %}
+            {{ ((quality.total - null_cnt) / quality.total * 100) | round(1) }}% populated
+          {% else %}
+            0% populated
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Duplicate Detection -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+  <h3 class="drawer-section-title">Duplicate Detection (Name + Address Collisions)</h3>
+  {% if quality.duplicates_by_name_address %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Place Name</th>
+          <th>Address</th>
+          <th>Collisions</th>
+          <th>Associated CIDs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for dup in quality.duplicates_by_name_address %}
+          <tr>
+            <td class="name-col">{{ dup.name }}</td>
+            <td class="address-col">{{ dup.address }}</td>
+            <td class="mono-col"><span class="badge" style="background:var(--accent-amber-glow);color:var(--accent-amber);">{{ dup.count }} copies</span></td>
+            <td class="mono-col">{{ dup.cids | join(', ') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="state-box" style="padding:24px;">
+      <div class="state-icon" style="color:var(--accent-green);">✓</div>
+      <div class="state-title" style="color:var(--text-primary);">Zero Duplicate Places Detected</div>
+      <div style="font-size:12px;">Global CID deduplication collapsed all overlapping tiles successfully.</div>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Coordinate Outliers -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+  <h3 class="drawer-section-title">Coordinate Outliers (Invalid Latitude / Longitude)</h3>
+  {% if quality.coordinate_outliers %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>CID</th>
+          <th>Name</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Issue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for out in quality.coordinate_outliers %}
+          <tr>
+            <td class="mono-col">{{ out.cid }}</td>
+            <td class="name-col">{{ out.name }}</td>
+            <td class="mono-col">{{ out.latitude }}</td>
+            <td class="mono-col">{{ out.longitude }}</td>
+            <td><span class="badge badge-status-failed">Out of Range / Zero</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="state-box" style="padding:24px;">
+      <div class="state-icon" style="color:var(--accent-green);">✓</div>
+      <div class="state-title" style="color:var(--text-primary);">All Coordinates Valid</div>
+      <div style="font-size:12px;">All geocoded places have valid non-zero latitude/longitude coordinates within bounds.</div>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Failed Rows & Error Breakdown -->
+<div class="table-card" style="padding:16px 20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h3 class="drawer-section-title" style="margin:0;border:none;">Failed Scraping Rows</h3>
+    {% if quality.failed_rows %}
+      <button class="btn btn-primary btn-sm" onclick="retryFailed()">Retry All Failed</button>
+    {% endif %}
+  </div>
+  {% if quality.failed_rows %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>CID</th>
+          <th>Name</th>
+          <th>Attempts</th>
+          <th>Error Message</th>
+          <th>Last Attempt</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in quality.failed_rows %}
+          <tr>
+            <td class="mono-col">{{ f.cid }}</td>
+            <td class="name-col">{{ f.name }}</td>
+            <td class="mono-col">{{ f.attempts }}</td>
+            <td style="color:var(--accent-rose);font-family:var(--font-mono);font-size:11px;">{{ f.error }}</td>
+            <td class="mono-col">{{ f.updated_at }}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="Drawer.open('{{ f.cid }}')">Inspect</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="state-box" style="padding:24px;">
+      <div class="state-icon" style="color:var(--accent-green);">✓</div>
+      <div class="state-title" style="color:var(--text-primary);">Zero Failed Rows</div>
+      <div style="font-size:12px;">Every attempted place record enriched and fetched with 100% success.</div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function retryFailed() {
+    fetch("/api/retry-failed", { method: "POST" })
+      .then(res => res.json())
+      .then(data => {
+        alert(`Reset ${data.reset_count} places to pending status. Check 'Runs' to re-execute.`);
+        window.location.reload();
+      });
+  }
+</script>
+{% endblock %}
