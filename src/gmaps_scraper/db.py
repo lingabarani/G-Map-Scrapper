@@ -209,6 +209,24 @@ CREATE TABLE IF NOT EXISTS job_events (
 );
 CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id);
 
+-- Regional geographic collection tasks for state-wise execution
+CREATE TABLE IF NOT EXISTS collection_tasks (
+    task_id TEXT PRIMARY KEY,
+    country_code TEXT NOT NULL,
+    region_code TEXT NOT NULL,
+    region_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    tile_id TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    attempt_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_region ON collection_tasks(country_code, region_code);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON collection_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_region_status ON collection_tasks(country_code, region_code, status);
+
 -- Triggers to maintain FTS index
 CREATE TRIGGER IF NOT EXISTS places_ai AFTER INSERT ON places BEGIN
   INSERT INTO places_fts(rowid, name, address, phone, website, category)
@@ -1158,3 +1176,191 @@ class Database:
             """)
             conn.commit()
             return cur.rowcount
+
+    # -------------------------------------------------------------------------
+    # Regional Collection Tasks (Pipeline 2 Scope & Task Tracking)
+    # -------------------------------------------------------------------------
+
+    def create_collection_task(self, task: Dict[str, Any]) -> bool:
+        """Idempotently insert or update a geographic collection task."""
+        sql = """
+        INSERT INTO collection_tasks (
+            task_id, country_code, region_code, region_name, category, tile_id,
+            status, attempt_count, last_error, updated_at
+        ) VALUES (
+            :task_id, :country_code, :region_code, :region_name, :category, :tile_id,
+            :status, :attempt_count, :last_error, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(task_id) DO UPDATE SET
+            country_code = excluded.country_code,
+            region_code = excluded.region_code,
+            region_name = excluded.region_name,
+            category = excluded.category,
+            tile_id = excluded.tile_id,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        params = {
+            "task_id": task["task_id"],
+            "country_code": task["country_code"].upper(),
+            "region_code": task["region_code"].upper(),
+            "region_name": task["region_name"],
+            "category": task["category"],
+            "tile_id": str(task["tile_id"]),
+            "status": task.get("status", "pending"),
+            "attempt_count": int(task.get("attempt_count", 0)),
+            "last_error": task.get("last_error"),
+        }
+        with self.get_connection() as conn:
+            cur = conn.execute(sql, params)
+            conn.commit()
+            return cur.rowcount > 0
+
+    def get_collection_tasks(
+        self,
+        country_code: Optional[str] = None,
+        region_code: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM collection_tasks WHERE 1=1"
+        params: List[Any] = []
+        if country_code:
+            query += " AND country_code = ?"
+            params.append(country_code.upper())
+        if region_code:
+            query += " AND region_code = ?"
+            params.append(region_code.upper())
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at ASC, task_id ASC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_region_progress(self, country_code: str, region_code: str) -> Dict[str, Any]:
+        """
+        Calculates region collection progress. A region is ONLY marked complete
+        when all configured tasks for that region exist and are status='completed'.
+        """
+        with self.get_connection() as conn:
+            rows = conn.execute("""
+                SELECT status, COUNT(*) as cnt
+                FROM collection_tasks
+                WHERE country_code = ? AND region_code = ?
+                GROUP BY status
+            """, (country_code.upper(), region_code.upper())).fetchall()
+            counts = {r["status"]: r["cnt"] for r in rows}
+            total = sum(counts.values())
+            completed = counts.get("completed", 0)
+            pending = counts.get("pending", 0)
+            failed = counts.get("failed", 0)
+            in_progress = counts.get("in_progress", 0)
+            is_complete = (total > 0 and completed == total)
+            return {
+                "country_code": country_code.upper(),
+                "region_code": region_code.upper(),
+                "total_tasks": total,
+                "completed_tasks": completed,
+                "pending_tasks": pending,
+                "failed_tasks": failed,
+                "in_progress_tasks": in_progress,
+                "is_complete": is_complete
+            }
+
+    def get_next_incomplete_task(
+        self,
+        country_code: str,
+        region_code: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves the next incomplete task (skipping all 'completed' tasks).
+        Picks pending or failed tasks ordered by creation time.
+        """
+        query = """
+            SELECT * FROM collection_tasks
+            WHERE country_code = ? AND status != 'completed'
+        """
+        params: List[Any] = [country_code.upper()]
+        if region_code:
+            query += " AND region_code = ?"
+            params.append(region_code.upper())
+        query += " ORDER BY created_at ASC, task_id ASC LIMIT 1"
+
+        with self.get_connection() as conn:
+            row = conn.execute(query, params).fetchone()
+            return dict(row) if row else None
+
+    def update_collection_task_status(
+        self,
+        task_id: str,
+        status: str,
+        error: Optional[str] = None
+    ) -> bool:
+        """Updates task status, incrementing attempt_count on failure or in_progress."""
+        with self.get_connection() as conn:
+            if status == "failed":
+                cur = conn.execute("""
+                    UPDATE collection_tasks
+                    SET status = 'failed',
+                        attempt_count = attempt_count + 1,
+                        last_error = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                """, (error, task_id))
+            elif status == "completed":
+                cur = conn.execute("""
+                    UPDATE collection_tasks
+                    SET status = 'completed',
+                        last_error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                """, (task_id,))
+            elif status == "in_progress":
+                cur = conn.execute("""
+                    UPDATE collection_tasks
+                    SET status = 'in_progress',
+                        attempt_count = attempt_count + 1,
+                        last_error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                """, (task_id,))
+            else:
+                cur = conn.execute("""
+                    UPDATE collection_tasks
+                    SET status = ?,
+                        last_error = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                """, (status, error, task_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def reset_failed_collection_tasks(
+        self,
+        country_code: Optional[str] = None,
+        region_code: Optional[str] = None,
+        max_attempts: Optional[int] = None
+    ) -> int:
+        """Resets failed tasks to 'pending' for retry."""
+        query = "UPDATE collection_tasks SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE status = 'failed'"
+        params: List[Any] = []
+        if country_code:
+            query += " AND country_code = ?"
+            params.append(country_code.upper())
+        if region_code:
+            query += " AND region_code = ?"
+            params.append(region_code.upper())
+        if max_attempts is not None:
+            query += " AND attempt_count < ?"
+            params.append(max_attempts)
+
+        with self.get_connection() as conn:
+            cur = conn.execute(query, params)
+            conn.commit()
+            return cur.rowcount
+

@@ -574,5 +574,70 @@ def jobs(
         )
     console.print(table)
 
+@app.command()
+def scope(
+    country: Optional[str] = typer.Option(None, "--country", "-C", help="Filter by country code: 'US' or 'MX'"),
+    region: Optional[str] = typer.Option(None, "--region", "-r", help="Filter by region code (e.g. 'CA', 'TX', 'JAL')"),
+    summary_only: bool = typer.Option(False, "--summary", "-s", help="Display only entity counts summary"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config")
+):
+    """Inspect Pipeline 2 geographic scope (US States and Mexico Federal Entities)."""
+    from .scope import get_target_countries, get_us_states, get_mexico_entities, validate_target_country, get_regions_for_country
+
+    cfg = load_config(config_path)
+    db = Database(cfg.absolute_db_path)
+    db.init_schema()
+
+    us_states = get_us_states()
+    mx_entities = get_mexico_entities()
+
+    if summary_only or (not country and not region):
+        table = Table(title="Pipeline 2 Target Scope Summary")
+        table.add_column("Country Code", style="cyan")
+        table.add_column("Country Name", style="white")
+        table.add_column("Configured Entities", style="green", justify="right")
+        table.add_row("US", "United States", f"{len(us_states)} States")
+        table.add_row("MX", "Mexico", f"{len(mx_entities)} Federal Entities")
+        console.print(table)
+        if summary_only:
+            return
+
+    countries_to_show = []
+    if country:
+        validated_c = validate_target_country(country)
+        countries_to_show = [validated_c]
+    else:
+        countries_to_show = ["US", "MX"]
+
+    for c in countries_to_show:
+        regions = get_regions_for_country(c)
+        if region:
+            reg_upper = region.strip().upper()
+            if reg_upper in regions:
+                regions = {reg_upper: regions[reg_upper]}
+            elif c == country:
+                console.print(f"[bold red]Region '{region}' not found in country '{c}'![/]")
+                raise typer.Exit(code=1)
+            else:
+                continue
+
+        c_name = "United States (50 States)" if c == "US" else "Mexico (32 Federal Entities)"
+        r_table = Table(title=f"Pipeline 2 Scope: {c_name}")
+        r_table.add_column("Code", style="cyan", width=8)
+        r_table.add_column("Name", style="white")
+        r_table.add_column("Total Tasks", style="yellow", justify="right")
+        r_table.add_column("Completed", style="green", justify="right")
+        r_table.add_column("Pending/Failed", style="magenta", justify="right")
+        r_table.add_column("State Complete?", style="bold", justify="center")
+
+        for code, reg_info in sorted(regions.items()):
+            prog = db.get_region_progress(c, code)
+            is_comp = "[green]YES[/]" if prog["is_complete"] else "[dim]NO[/]"
+            pending_str = f"{prog['pending_tasks']}/{prog['failed_tasks']}"
+            r_table.add_row(code, reg_info.name, str(prog["total_tasks"]), str(prog["completed_tasks"]), pending_str, is_comp)
+
+        console.print(r_table)
+
 if __name__ == "__main__":
     app()
+
