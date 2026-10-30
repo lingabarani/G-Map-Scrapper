@@ -236,21 +236,25 @@
       </div>
 
       <!-- Stage Stepper -->
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:4px;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;overflow-x:auto;padding-bottom:4px;">
         <div id="step-queued" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">1. Queued</div>
         <span style="color:#475569;">→</span>
-        <div id="step-resolving" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">2. Resolving</div>
+        <div id="step-resolving" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">2. Resolve Target</div>
         <span style="color:#475569;">→</span>
-        <div id="step-discovering" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">3. Tiling & Discover</div>
+        <div id="step-discovering" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">3. Discover Businesses</div>
         <span style="color:#475569;">→</span>
-        <div id="step-enriching" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">4. Details</div>
+        <div id="step-enriching" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">4. Save Business Records</div>
         <span style="color:#475569;">→</span>
-        <div id="step-reviews" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">5. Reviews</div>
+        <div id="step-reviews" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">5. Reviews (Optional)</div>
         <span style="color:#475569;">→</span>
-        <div id="step-photos" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">6. Photos</div>
+        <div id="step-photos" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">6. Photos (Optional)</div>
         <span style="color:#475569;">→</span>
         <div id="step-done" class="stepper-step" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#0f172a;color:#64748b;border:1px solid #334155;">7. Complete</div>
       </div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px;">
+        ℹ️ Discovered businesses are saved to SQLite. Official website discovery and company enrichment can be run from <a href="/pipeline" style="color:#38bdf8;text-decoration:none;">Pipeline Control</a>. Customer reviews and photos are optional supplemental operations.
+      </div>
+
 
       <!-- Live Counters Cards -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;">

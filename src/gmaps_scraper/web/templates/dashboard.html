@@ -1,106 +1,162 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard — GMap Scraper{% endblock %}
+{% block title %}Overview — Business Intelligence Pipeline | GMaps Scraper{% endblock %}
 
 {% block content %}
 <div class="view-header">
   <div>
-    <h1 class="view-title">Scraper Overview & Statistics</h1>
-    <div class="view-subtitle">Live health metrics and dataset distribution computed from local SQLite database</div>
+    <h1 class="view-title">Pipeline Overview & Intelligence Dashboard</h1>
+    <div class="view-subtitle">Live metrics for business discovery, official website verification, and company profile enrichment computed directly from SQLite</div>
   </div>
   <div style="display:flex;gap:10px;">
-    <a href="/runs" class="btn btn-secondary btn-sm">Manage Runs</a>
-    <a href="/places" class="btn btn-primary btn-sm">Browse Places &rarr;</a>
+    <a href="/pipeline" class="btn btn-secondary btn-sm">Pipeline Control &rarr;</a>
+    <a href="/enrichment" class="btn btn-secondary btn-sm">Website Enrichment &rarr;</a>
+    <a href="/places" class="btn btn-primary btn-sm">Business Explorer &rarr;</a>
   </div>
 </div>
 
-<!-- Live Search Quick Bar -->
-<div class="card"
-  style="background:#1e293b;border:1px solid rgba(56,189,248,0.3);border-radius:10px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:300px;">
-    <span style="font-size:16px;">⚡</span>
-    <input type="text" id="dashQuickInput"
-      placeholder="Live search on-demand: e.g. hospitals in Chicago or bakeries in Lyon, France..."
-      style="flex:1;background:#0f172a;border:1px solid #334155;color:#fff;border-radius:6px;padding:7px 12px;font-size:13px;"
-      onkeydown="if(event.key==='Enter'){const v=this.value.trim();if(v)location.href='/live?q='+encodeURIComponent(v);}">
+{% if stats.total_places == 0 %}
+<!-- Empty Database State -->
+<div class="card" style="padding:48px 32px;text-align:center;background:var(--bg-card);border:1px dashed var(--border-subtle);border-radius:12px;margin-bottom:24px;">
+  <div style="font-size:40px;margin-bottom:12px;">📊</div>
+  <h2 style="font-size:18px;font-weight:600;color:var(--text-main);margin-bottom:8px;">No Business Records in SQLite Database</h2>
+  <p style="color:var(--text-muted);max-width:550px;margin:0 auto 20px;font-size:13px;line-height:1.6;">
+    The database currently contains 0 records. Start by discovering businesses in USA or Mexico using Stage 1 in Pipeline Control, or launch a targeted query in Live Search.
+  </p>
+  <div style="display:flex;justify-content:center;gap:12px;">
+    <a href="/pipeline" class="btn btn-primary btn-sm">Go to Pipeline Control</a>
+    <a href="/live" class="btn btn-secondary btn-sm">Launch Live Search</a>
   </div>
-  <button class="btn btn-primary btn-sm"
-    onclick="const v=document.getElementById('dashQuickInput').value.trim(); if(v) location.href='/live?q='+encodeURIComponent(v);">
-    Launch Live Search &rarr;
-  </button>
 </div>
+{% endif %}
 
-<!-- KPI Status Cards -->
+<!-- Stage 1 & 2 & 3 Primary Metric KPI Grid -->
 <div class="stats-grid">
   <div class="stat-card accent-cyan">
     <div class="stat-label">Total Places</div>
     <div class="stat-value">{{ stats.total_places }}</div>
-    <div class="stat-sub">Discovered in grid</div>
+    <div class="stat-sub">Discovered business records</div>
+  </div>
+
+  <div class="stat-card accent-blue">
+    <div class="stat-label">Websites Found</div>
+    <div class="stat-value">{{ stats.with_website_count }}</div>
+    <div class="stat-sub">
+      {% if stats.total_places > 0 %}
+      {{ (stats.with_website_count / stats.total_places * 100) | round(1) }}% of total records
+      {% else %}
+      0%
+      {% endif %}
+    </div>
   </div>
 
   <div class="stat-card accent-green">
-    <div class="stat-label">Enriched Places</div>
-    <div class="stat-value">{{ stats.enriched_places }}</div>
+    <div class="stat-label">Verified Websites</div>
+    <div class="stat-value">{{ stats.verified_websites_count }}</div>
     <div class="stat-sub">
       {% if stats.total_places > 0 %}
-      {{ (stats.enriched_places / stats.total_places * 100) | round(1) }}% completed
+      {{ (stats.verified_websites_count / stats.total_places * 100) | round(1) }}% verified official
       {% else %}
-      0% completed
+      0% verified
       {% endif %}
     </div>
   </div>
 
   <div class="stat-card accent-purple">
-    <div class="stat-label">Total Reviews</div>
-    <div class="stat-value">{{ stats.total_reviews }}</div>
-    <div class="stat-sub">Extracted comments</div>
+    <div class="stat-label">Enriched Companies</div>
+    <div class="stat-value">{{ stats.enrichment_completed_count }}</div>
+    <div class="stat-sub">
+      {% if stats.verified_websites_count > 0 %}
+      {{ (stats.enrichment_completed_count / stats.verified_websites_count * 100) | round(1) }}% of verified
+      {% else %}
+      0%
+      {% endif %}
+    </div>
   </div>
 
   <div class="stat-card accent-amber">
-    <div class="stat-label">Local Photos</div>
-    <div class="stat-value">{{ stats.total_photos }}</div>
-    <div class="stat-sub">Stored in data/photos/</div>
+    <div class="stat-label">Profiles Extracted</div>
+    <div class="stat-value">{{ stats.company_profiles_count }}</div>
+    <div class="stat-sub">Company overviews & services</div>
+  </div>
+
+  <div class="stat-card accent-cyan">
+    <div class="stat-label">Leadership Records</div>
+    <div class="stat-value">{{ stats.company_leaders_count }}</div>
+    <div class="stat-sub">Public executives & titles</div>
+  </div>
+
+  <div class="stat-card accent-green">
+    <div class="stat-label">Business Contacts</div>
+    <div class="stat-value">{{ stats.company_contacts_count }}</div>
+    <div class="stat-sub">Public emails, phones & social</div>
   </div>
 
   <div class="stat-card accent-rose">
-    <div class="stat-label">Failed Places</div>
-    <div class="stat-value">{{ stats.failed_places }}</div>
+    <div class="stat-label">Pending / Failed Tasks</div>
+    <div class="stat-value">{{ stats.pending_places + stats.failed_places }}</div>
     <div class="stat-sub">
-      {% if stats.failed_places > 0 %}
-      <a href="/quality" style="color:var(--accent-rose);text-decoration:none;">View & Retry &rarr;</a>
-      {% else %}
-      0 errors recorded
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-label">Last Run</div>
-    <div class="stat-value" style="font-size:16px;margin:8px 0;">
-      {% if stats.last_run %}
-      <span class="badge badge-status-{{ stats.last_run.status }}">{{ stats.last_run.status | upper }}</span>
-      {% else %}
-      <span class="empty-dash">—</span>
-      {% endif %}
-    </div>
-    <div class="stat-sub mono-col">
-      {% if stats.last_run %}
-      {{ stats.last_run.query or 'search' }} ({{ stats.last_run.start_time[:16] }})
-      {% else %}
-      No runs recorded
-      {% endif %}
+      <span style="color:var(--accent-amber);">{{ stats.pending_places }} pending</span> &bull; 
+      <span style="color:var(--accent-rose);">{{ stats.failed_places }} failed</span>
     </div>
   </div>
 </div>
 
-<!-- Charts Section -->
-<div class="dashboard-charts">
+<!-- Primary Pipeline Stage Visual Charts -->
+<div class="dashboard-charts" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;margin-bottom:20px;">
+  <!-- Chart 1: Website Verification Status -->
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Website Verification Status</div>
+      <span style="font-size:11px;color:var(--text-muted);">Step 2 Discovery</span>
+    </div>
+    <div class="canvas-container" style="height:210px;">
+      <canvas id="verificationStatusChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+
+  <!-- Chart 2: Enrichment Status -->
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Company Enrichment Status</div>
+      <span style="font-size:11px;color:var(--text-muted);">Step 3 Extraction</span>
+    </div>
+    <div class="canvas-container" style="height:210px;">
+      <canvas id="enrichmentStatusChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+
+  <!-- Chart 3: Country / Region Distribution -->
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Geographic Scope Distribution</div>
+      <span style="font-size:11px;color:var(--text-muted);">USA & Mexico</span>
+    </div>
+    <div class="canvas-container" style="height:210px;">
+      <canvas id="geoScopeChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+
+  <!-- Chart 4: Extraction Coverage -->
+  <div class="chart-box">
+    <div class="chart-box-header">
+      <div class="chart-box-title">Extraction Coverage Rates</div>
+      <span style="font-size:11px;color:var(--text-muted);">% of Database</span>
+    </div>
+    <div class="canvas-container" style="height:210px;">
+      <canvas id="extractionCoverageChart" style="width:100%;height:100%;"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Secondary Charts Section: Preserves ratingChart & categoriesChart for test suite compatibility -->
+<div class="dashboard-charts" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;margin-bottom:20px;">
   <div class="chart-box">
     <div class="chart-box-header">
       <div class="chart-box-title">Rating Distribution (1 to 5 Stars)</div>
       <span style="font-size:11px;color:var(--text-muted);">Canvas Histogram</span>
     </div>
-    <div class="canvas-container" style="height:220px;">
+    <div class="canvas-container" style="height:190px;">
       <canvas id="ratingChart" style="width:100%;height:100%;"></canvas>
     </div>
   </div>
@@ -110,41 +166,104 @@
       <div class="chart-box-title">Top Categories</div>
       <span style="font-size:11px;color:var(--text-muted);">Frequency</span>
     </div>
-    <div class="canvas-container" style="height:220px;">
+    <div class="canvas-container" style="height:190px;">
       <canvas id="categoriesChart" style="width:100%;height:100%;"></canvas>
     </div>
   </div>
 </div>
 
-<!-- Bottom Status Breakdown -->
-<div class="table-card" style="padding:16px 20px;">
+<!-- Recent Pipeline Runs & Logs Table -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <h3 style="font-size:13px;font-weight:600;color:var(--text-primary);">Pipeline Status Breakdown</h3>
-    <span style="font-size:11px;color:var(--text-muted);">Direct from SQLite `places`</span>
-  </div>
-  <div style="display:flex;flex-wrap:wrap;gap:12px;">
-    {% for status, count in stats.status_breakdown.items() %}
-    <div
-      style="background:var(--bg-surface);padding:8px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);display:flex;gap:10px;align-items:center;">
-      <span class="badge badge-status-{{ status }}">{{ status }}</span>
-      <span style="font-family:var(--font-mono);font-weight:700;">{{ count }}</span>
+    <div>
+      <h3 style="font-size:14px;font-weight:600;color:var(--text-main);">Recent Pipeline Tasks & Runs</h3>
+      <div style="font-size:11px;color:var(--text-muted);">Real-time task tracking from `collection_tasks` and `jobs`</div>
     </div>
-    {% endfor %}
+    <a href="/runs" class="btn btn-secondary btn-sm">Full Execution Logs &rarr;</a>
   </div>
+
+  {% if stats.recent_jobs and stats.recent_jobs | length > 0 %}
+  <table class="data-table" style="font-size:12px;">
+    <thead>
+      <tr>
+        <th>Job / Task</th>
+        <th>Target Scope</th>
+        <th>Status</th>
+        <th>Records</th>
+        <th>Started At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for j in stats.recent_jobs[:5] %}
+      <tr>
+        <td style="font-weight:500;">{{ j.query or j.name or 'Collection Run' }}</td>
+        <td>{{ j.location or 'USA/MX' }}</td>
+        <td><span class="badge badge-status-{{ j.status }}">{{ j.status }}</span></td>
+        <td class="mono-col">{{ j.discovered_count or j.total_places or 0 }} discovered</td>
+        <td class="mono-col" style="color:var(--text-muted);">{{ j.created_at or j.start_time or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">
+    No recent pipeline runs logged yet. Execute Stage 1 or Stage 2 in <a href="/pipeline" style="color:var(--accent-cyan);">Pipeline Control</a>.
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const ratingDist = {{ stats.rating_distribution | tojson
-  }};
-  const topCats = {{ stats.top_categories | tojson }};
+document.addEventListener("DOMContentLoaded", () => {
+  const stats = {{ stats | tojson }};
 
-  if (window.CanvasCharts) {
-    window.CanvasCharts.drawRatingHistogram("ratingChart", ratingDist);
-    window.CanvasCharts.drawCategoriesChart("categoriesChart", topCats);
-  }
-  });
+  if (!window.CanvasCharts) return;
+
+  // 1. Rating Histogram & Top Categories (Existing support)
+  window.CanvasCharts.drawRatingHistogram("ratingChart", stats.rating_distribution || {});
+  window.CanvasCharts.drawCategoriesChart("categoriesChart", stats.top_categories || []);
+
+  // 2. Verification Status Donut
+  const verBreakdown = stats.website_status_breakdown || {};
+  const verSegments = [
+    { label: "Verified", value: verBreakdown["verified"] || 0, color: "#10b981" },
+    { label: "Candidates", value: verBreakdown["candidate"] || 0, color: "#38bdf8" },
+    { label: "Needs Review", value: verBreakdown["needs_review"] || 0, color: "#f59e0b" },
+    { label: "Missing", value: verBreakdown["website_missing"] || 0, color: "#64748b" },
+    { label: "Failed", value: verBreakdown["failed"] || 0, color: "#f43f5e" }
+  ];
+  window.CanvasCharts.drawDonutChart("verificationStatusChart", verSegments);
+
+  // 3. Enrichment Status Donut
+  const enrichBreakdown = stats.enrichment_status_breakdown || {};
+  const enrichSegments = [
+    { label: "Completed", value: enrichBreakdown["completed"] || 0, color: "#10b981" },
+    { label: "Partial", value: enrichBreakdown["partial"] || 0, color: "#38bdf8" },
+    { label: "Pending", value: enrichBreakdown["pending"] || 0, color: "#f59e0b" },
+    { label: "No Data", value: enrichBreakdown["no_data"] || 0, color: "#64748b" },
+    { label: "Failed", value: enrichBreakdown["failed"] || 0, color: "#f43f5e" }
+  ];
+  window.CanvasCharts.drawDonutChart("enrichmentStatusChart", enrichSegments);
+
+  // 4. Geographic Scope Bars
+  const countryDist = stats.country_distribution || {};
+  const geoItems = Object.keys(countryDist).map(k => ({
+    label: k === "US" ? "USA" : k === "MX" ? "Mexico" : k,
+    count: countryDist[k],
+    color: k === "US" ? "#38bdf8" : "#10b981"
+  }));
+  window.CanvasCharts.drawHorizontalBarChart("geoScopeChart", geoItems);
+
+  // 5. Extraction Coverage Bars (% of total places)
+  const total = stats.total_places || 1;
+  const coverageItems = [
+    { label: "Official Web", value: Math.round((stats.verified_websites_count || 0) / total * 100), suffix: "%", color: "#10b981" },
+    { label: "Co. Profile", value: Math.round((stats.company_profiles_count || 0) / total * 100), suffix: "%", color: "#8b5cf6" },
+    { label: "Leadership", value: Math.round((stats.company_leaders_count || 0) / total * 100), suffix: "%", color: "#38bdf8" },
+    { label: "Contacts", value: Math.round((stats.company_contacts_count || 0) / total * 100), suffix: "%", color: "#06b6d4" }
+  ];
+  window.CanvasCharts.drawHorizontalBarChart("extractionCoverageChart", coverageItems);
+});
 </script>
 {% endblock %}

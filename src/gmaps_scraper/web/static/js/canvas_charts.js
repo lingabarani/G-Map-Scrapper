@@ -224,5 +224,145 @@ window.CanvasCharts = {
         ctx.fillText(label, x + slotW / 2, padding.top + chartH + 14);
       }
     }
+  },
+
+  /**
+   * Draws generic horizontal bars (e.g. for Countries/Regions or Extraction Coverage)
+   */
+  drawHorizontalBarChart(canvasId, items, defaultColor = "#38bdf8") {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    ctx.clearRect(0, 0, width, height);
+
+    if (!items || items.length === 0) {
+      ctx.fillStyle = "#64748b";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    const maxVal = Math.max(1, ...items.map(it => it.count || it.value || 0));
+    const padding = { top: 12, right: 55, bottom: 12, left: 110 };
+    const rowH = (height - padding.top - padding.bottom) / items.length;
+    const barMaxW = width - padding.left - padding.right;
+
+    items.forEach((item, i) => {
+      const val = item.count !== undefined ? item.count : (item.value || 0);
+      const y = padding.top + i * rowH;
+      const barW = Math.max(4, (val / maxVal) * barMaxW);
+      const barH = Math.min(22, rowH * 0.65);
+      const color = item.color || defaultColor;
+
+      // Label
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "11px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "right";
+      let name = item.label || item.name || item.category || "";
+      if (name.length > 15) name = name.substring(0, 13) + "…";
+      ctx.fillText(name, padding.left - 10, y + barH * 0.75);
+
+      // Bar
+      const grad = ctx.createLinearGradient(padding.left, 0, padding.left + barW, 0);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, color + "aa");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(padding.left, y, barW, barH, [0, 3, 3, 0]);
+      ctx.fill();
+
+      // Value label
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "10.5px ui-monospace, monospace";
+      ctx.textAlign = "left";
+      const valText = item.suffix ? `${val}${item.suffix}` : val.toString();
+      ctx.fillText(valText, padding.left + barW + 8, y + barH * 0.75);
+    });
+  },
+
+  /**
+   * Draws a donut chart with legend
+   */
+  drawDonutChart(canvasId, segments) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    ctx.clearRect(0, 0, width, height);
+
+    const validSegs = (segments || []).filter(s => (s.value || 0) > 0);
+    const total = validSegs.reduce((sum, s) => sum + s.value, 0);
+
+    if (total === 0) {
+      ctx.fillStyle = "#64748b";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    const centerX = width * 0.35;
+    const centerY = height * 0.5;
+    const radius = Math.min(centerX - 20, centerY - 15);
+    const innerRadius = radius * 0.55;
+
+    let startAngle = -Math.PI / 2;
+
+    validSegs.forEach(seg => {
+      const sliceAngle = (seg.value / total) * 2 * Math.PI;
+      const endAngle = startAngle + sliceAngle;
+
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+      ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
+      ctx.closePath();
+
+      ctx.fillStyle = seg.color || "#38bdf8";
+      ctx.fill();
+
+      startAngle = endAngle;
+    });
+
+    // Center total text
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 14px ui-monospace, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(total.toString(), centerX, centerY + 5);
+
+    // Legend on the right
+    const legendX = width * 0.62;
+    const legendY = Math.max(15, (height - validSegs.length * 20) / 2);
+
+    validSegs.forEach((seg, i) => {
+      const ly = legendY + i * 22;
+      // Color dot
+      ctx.fillStyle = seg.color || "#38bdf8";
+      ctx.beginPath();
+      ctx.arc(legendX, ly + 4, 4, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Text
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "11px -apple-system, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(`${seg.label}: ${seg.value}`, legendX + 12, ly + 8);
+    });
   }
 };
+

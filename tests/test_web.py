@@ -270,3 +270,108 @@ def test_pagination_edge_cases_and_shapes(web_client):
     assert r_out.status_code == 200
     assert len(r_out.json()["items"]) == 0
     assert r_out.json()["total"] >= 6
+
+def test_pipeline_control_view(web_client):
+    client, _ = web_client
+    resp = client.get("/pipeline")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Pipeline Control" in html
+    assert "STAGE 1" in html
+    assert "STAGE 2" in html
+    assert "STAGE 3" in html
+    assert "Planned Pipeline Roadmap" in html
+    assert "Step 4" in html
+
+def test_website_enrichment_view(web_client):
+    client, _ = web_client
+    resp = client.get("/enrichment")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Website Discovery &amp; Company Enrichment" in html
+    assert "Verified Websites" in html
+    assert "Candidates" in html
+
+def test_scope_regions_api(web_client):
+    client, _ = web_client
+    # All
+    r_all = client.get("/api/scope/regions")
+    assert r_all.status_code == 200
+    data_all = r_all.json()
+    assert "US" in data_all["countries"]
+    assert "MX" in data_all["countries"]
+    assert len(data_all["us_states"]) == 50
+    assert len(data_all["mexico_entities"]) == 32
+
+    # US filter
+    r_us = client.get("/api/scope/regions?country_code=US")
+    assert r_us.status_code == 200
+    assert len(r_us.json()["regions"]) == 50
+
+    # MX filter
+    r_mx = client.get("/api/scope/regions?country_code=MX")
+    assert r_mx.status_code == 200
+    assert len(r_mx.json()["regions"]) == 32
+
+    # Invalid country
+    r_err = client.get("/api/scope/regions?country_code=CA")
+    assert r_err.status_code == 400
+
+def test_enrichment_stats_and_items_api(web_client):
+    client, _ = web_client
+    r_stats = client.get("/api/enrichment/stats")
+    assert r_stats.status_code == 200
+    stats = r_stats.json()
+    assert "discovery" in stats
+    assert "enrichment" in stats
+
+    r_items = client.get("/api/enrichment/items?tab=all&page=1&page_size=10")
+    assert r_items.status_code == 200
+    items_data = r_items.json()
+    assert "items" in items_data
+    assert "total" in items_data
+
+def test_pipeline_run_discovery_api_dry_run(web_client):
+    client, _ = web_client
+    resp = client.post("/api/pipeline/run-discovery", json={
+        "country_code": "US",
+        "limit": 5,
+        "dry_run": True
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("dry_run") is True
+    assert "counts" in data
+
+def test_pipeline_run_enrichment_api_dry_run(web_client):
+    client, _ = web_client
+    resp = client.post("/api/pipeline/run-enrichment", json={
+        "country_code": "US",
+        "limit": 5,
+        "max_pages": 3,
+        "dry_run": True
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("dry_run") is True
+    assert "counts" in data
+
+def test_empty_database_dashboard():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        cfg = ScraperConfig(
+            data_dir=tmp_path / "data",
+            db_path=tmp_path / "data" / "empty.sqlite",
+            photos_dir=tmp_path / "data" / "photos",
+            logs_dir=tmp_path / "logs",
+            output_dir=tmp_path / "output",
+        )
+        db = Database(cfg.absolute_db_path)
+        db.init_schema()
+        app = create_app(cfg)
+        client = TestClient(app)
+
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "No Business Records in SQLite Database" in resp.text
+

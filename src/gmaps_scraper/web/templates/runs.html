@@ -1,41 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}Pipeline Runs &amp; Logs — GMap Scraper{% endblock %}
+{% block title %}Pipeline Runs &amp; Logs — Business Intelligence Pipeline | GMaps Scraper{% endblock %}
 
 {% block content %}
 <div class="view-header">
   <div>
     <h1 class="view-title">Pipeline Execution &amp; Live Monitoring</h1>
-    <div class="view-subtitle">Trigger scrapers, watch real-time step counters and stream live logs without leaving localhost</div>
+    <div class="view-subtitle">Persistent execution history from SQLite `jobs` and `collection_tasks`, active progress monitors, and real-time log streaming</div>
   </div>
+
   <div style="display:flex;gap:8px;">
-    <button class="btn btn-primary btn-sm" onclick="triggerAction('resume')">▶ Resume Run</button>
-    <button class="btn btn-secondary btn-sm" onclick="triggerAction('retry-failed')">↺ Retry Failed</button>
+    <button class="btn btn-primary btn-sm" onclick="triggerAction('resume')">▶ Resume Incomplete Run</button>
+    <button class="btn btn-secondary btn-sm" onclick="triggerAction('retry-failed')">↺ Retry Failed Records</button>
   </div>
 </div>
 
-<!-- Trigger Pipeline Actions Card -->
-<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
-  <h3 class="drawer-section-title">Trigger Pipeline Actions</h3>
-  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-    <button class="btn btn-secondary" onclick="triggerRun('search')">1. Tile Discovery (Search)</button>
-    <button class="btn btn-secondary" onclick="triggerRun('enrich')">2. Enrich Details</button>
-    <button class="btn btn-secondary" onclick="triggerRun('reviews')">3. Fetch Reviews</button>
-    <button class="btn btn-secondary" onclick="triggerRun('photos')">4. Download Photos</button>
-    <button class="btn btn-secondary" onclick="triggerRun('export')">5. Export Data</button>
-    <button class="btn btn-primary" onclick="triggerRun('full')">⚡ Run Full Pipeline</button>
-  </div>
-</div>
-
-<!-- Live Run Progress Card -->
-<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
+<!-- Active Run Progress Card -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div>
       <h3 style="font-size:14px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
-        Active Run Status:
+        Active Run Monitor:
         <span id="runStatusBadge" class="badge badge-status-pending">IDLE</span>
       </h3>
-      <div id="runStepSub" style="font-size:12px;color:var(--text-muted);margin-top:2px;">No active scraper process</div>
+      <div id="runStepSub" style="font-size:12px;color:var(--text-muted);margin-top:2px;">No active background scraper process</div>
     </div>
     <div id="etaDisplay" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-cyan);">
       ETA: —
@@ -70,11 +58,97 @@
   </div>
 </div>
 
+<!-- Persistent Tasks & Runs History Table -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div>
+      <h3 style="font-size:14px;font-weight:700;color:var(--text-primary);margin:0;">Persistent Run &amp; Task History</h3>
+      <div style="font-size:11.5px;color:var(--text-muted);">Actual historical tasks logged from collection and enrichment workflows</div>
+    </div>
+    <a href="/pipeline" class="btn btn-secondary btn-sm">Launch New Stage &rarr;</a>
+  </div>
+
+  {% if (tasks and tasks | length > 0) or (jobs and jobs | length > 0) %}
+  <div class="table-wrap full-data-mode">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Identifier</th>
+          <th>Stage</th>
+          <th>Country / Region</th>
+          <th>Started</th>
+          <th>Ended / Last Update</th>
+          <th>Status</th>
+          <th>Processed</th>
+          <th>Error / Reason</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- 1. Pipeline Collection Tasks -->
+        {% for t in tasks %}
+        <tr>
+          <td class="mono-col" style="font-weight:600;color:var(--accent-cyan);">{{ t.task_id[:16] }}…</td>
+          <td><span class="badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);">Collection Task</span></td>
+          <td><strong>{{ t.country_code }}</strong>{% if t.region_code %} / {{ t.region_code }}{% endif %}</td>
+          <td class="mono-col">{{ t.started_at[:16] if t.started_at else t.created_at[:16] }}</td>
+          <td class="mono-col">{{ t.completed_at[:16] if t.completed_at else t.updated_at[:16] }}</td>
+          <td><span class="badge badge-status-{{ t.status }}">{{ t.status }}</span></td>
+          <td class="mono-col">
+            {{ t.collected_count or 0 }} collected &bull; {{ t.verified_count or 0 }} verified
+          </td>
+          <td style="color:var(--accent-rose);font-size:11px;" class="mono-col">
+            {{ t.last_error or '—' }}
+          </td>
+          <td>
+            <a href="/pipeline" class="btn btn-secondary btn-sm">Stage Control</a>
+          </td>
+        </tr>
+        {% endfor %}
+
+        <!-- 2. Live Scrape Jobs -->
+        {% for j in jobs %}
+        {% set jid = j.job_id or j.id or '' %}
+        <tr>
+          <td class="mono-col">{{ jid[:16] }}…</td>
+          <td><span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;">Live Scrape</span></td>
+          <td>{{ j.location or j.location_input or 'USA/MX' }}</td>
+          <td class="mono-col">{{ j.created_at[:16] if j.created_at else '—' }}</td>
+          <td class="mono-col">{{ j.updated_at[:16] if j.updated_at else (j.started_at[:16] if j.started_at else '—') }}</td>
+          <td><span class="badge badge-status-{{ j.status }}">{{ j.status }}</span></td>
+          <td class="mono-col">
+            {{ j.discovered_count or j.places_found or 0 }} found &bull; {{ j.enriched_count or 0 }} enriched
+          </td>
+          <td style="color:var(--accent-rose);font-size:11px;" class="mono-col">
+            {{ j.error_message or j.error or '—' }}
+          </td>
+          <td>
+            {% if j.status in ['failed', 'cancelled'] %}
+            <button class="btn btn-secondary btn-sm" onclick="retryJob('{{ jid }}')">Retry</button>
+            {% else %}
+            <a href="/live?job_id={{ jid }}" class="btn btn-secondary btn-sm">Stream</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="state-box" style="padding:28px;">
+    <div class="state-icon">📜</div>
+    <div class="state-title">No Historical Runs Recorded</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Start a collection run or website discovery task in Pipeline Control to see persistent history.</div>
+    <a href="/pipeline" class="btn btn-primary btn-sm">Go to Pipeline Control &rarr;</a>
+  </div>
+  {% endif %}
+</div>
+
 <!-- Live Log Tail Terminal -->
 <div class="table-card" style="padding:16px 20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <h3 style="font-size:13px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;">
-      <span>Live Log Tail</span>
+    <h3 style="font-size:13px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;margin:0;">
+      <span>Live Local Log Stream</span>
       <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(logs/gmaps.log)</span>
     </h3>
     <div style="display:flex;gap:6px;">
@@ -90,79 +164,81 @@
 
 {% block scripts %}
 <script>
-  function triggerAction(action) {
-    fetch(`/api/${action}`, { method: "POST" })
-      .then(res => res.json())
-      .then(data => {
-        pollProgress();
-        fetchLogs();
-      });
+function triggerAction(action) {
+  fetch(`/api/${action}`, { method: "POST" })
+    .then(res => res.json())
+    .then(data => {
+      pollProgress();
+      fetchLogs();
+    });
+}
+
+async function retryJob(jobId) {
+  try {
+    const res = await fetch(`/api/live/retry/${jobId}`, { method: "POST" });
+    const data = await res.json();
+    alert(`Job re-queued! New Job ID: ${data.job_id}`);
+    location.reload();
+  } catch (e) {
+    alert(`Failed to retry: ${e.message}`);
   }
+}
 
-  function triggerRun(action) {
-    fetch(`/api/run/${action}`, { method: "POST" })
-      .then(res => res.json())
-      .then(data => {
-        pollProgress();
-        fetchLogs();
-      });
-  }
+function pollProgress() {
+  fetch("/api/progress")
+    .then(res => res.json())
+    .then(data => {
+      const badge = document.getElementById("runStatusBadge");
+      const step = document.getElementById("runStepSub");
+      const bar = document.getElementById("progressBar");
+      const eta = document.getElementById("etaDisplay");
 
-  function pollProgress() {
-    fetch("/api/progress")
-      .then(res => res.json())
-      .then(data => {
-        const badge = document.getElementById("runStatusBadge");
-        const step = document.getElementById("runStepSub");
-        const bar = document.getElementById("progressBar");
-        const eta = document.getElementById("etaDisplay");
+      if (badge) {
+        badge.textContent = (data.status || "IDLE").toUpperCase();
+        badge.className = `badge badge-status-${data.status || 'pending'}`;
+      }
+      if (step) {
+        step.textContent = data.current_step ? `Current step: ${data.current_step}` : "Idle";
+      }
+      if (document.getElementById("cntDiscovered")) document.getElementById("cntDiscovered").textContent = data.total_discovered || 0;
+      if (document.getElementById("cntEnriched")) document.getElementById("cntEnriched").textContent = data.total_enriched || 0;
+      if (document.getElementById("cntReviews")) document.getElementById("cntReviews").textContent = data.total_reviews || 0;
+      if (document.getElementById("cntPhotos")) document.getElementById("cntPhotos").textContent = data.total_photos || 0;
+      if (document.getElementById("cntErrors")) document.getElementById("cntErrors").textContent = data.errors_count || 0;
 
-        if (badge) {
-          badge.textContent = (data.status || "IDLE").toUpperCase();
-          badge.className = `badge badge-status-${data.status || 'pending'}`;
+      if (data.total_discovered > 0) {
+        const pct = Math.min(100, Math.round(((data.total_enriched || 0) / data.total_discovered) * 100));
+        if (bar) bar.style.width = pct + "%";
+      } else {
+        if (bar) bar.style.width = data.status === "completed" ? "100%" : "0%";
+      }
+
+      if (eta) {
+        eta.textContent = data.eta_seconds != null ? `ETA: ~${Math.round(data.eta_seconds)}s` : "ETA: —";
+      }
+    });
+}
+
+function fetchLogs() {
+  fetch("/api/logs?tail=150")
+    .then(res => res.json())
+    .then(data => {
+      const term = document.getElementById("logTerminal");
+      if (term) {
+        term.textContent = data.logs || "No logs generated yet.";
+        const check = document.getElementById("autoScrollCheck");
+        if (check && check.checked) {
+          term.scrollTop = term.scrollHeight;
         }
-        if (step) {
-          step.textContent = data.current_step ? `Current step: ${data.current_step}` : "Idle";
-        }
-        if (document.getElementById("cntDiscovered")) document.getElementById("cntDiscovered").textContent = data.total_discovered || 0;
-        if (document.getElementById("cntEnriched")) document.getElementById("cntEnriched").textContent = data.total_enriched || 0;
-        if (document.getElementById("cntReviews")) document.getElementById("cntReviews").textContent = data.total_reviews || 0;
-        if (document.getElementById("cntPhotos")) document.getElementById("cntPhotos").textContent = data.total_photos || 0;
-        if (document.getElementById("cntErrors")) document.getElementById("cntErrors").textContent = data.errors_count || 0;
+      }
+    });
+}
 
-        if (data.total_discovered > 0) {
-          const pct = Math.min(100, Math.round(((data.total_enriched || 0) / data.total_discovered) * 100));
-          if (bar) bar.style.width = pct + "%";
-        } else {
-          if (bar) bar.style.width = data.status === "completed" ? "100%" : "0%";
-        }
-
-        if (eta) {
-          eta.textContent = data.eta_seconds != null ? `ETA: ~${Math.round(data.eta_seconds)}s` : "ETA: —";
-        }
-      });
-  }
-
-  function fetchLogs() {
-    fetch("/api/logs?tail=150")
-      .then(res => res.json())
-      .then(data => {
-        const term = document.getElementById("logTerminal");
-        if (term) {
-          term.textContent = data.logs || "No logs generated yet. Trigger a run or launch CLI to populate.";
-          const check = document.getElementById("autoScrollCheck");
-          if (check && check.checked) {
-            term.scrollTop = term.scrollHeight;
-          }
-        }
-      });
-  }
-
-  document.addEventListener("DOMContentLoaded", () => {
-    pollProgress();
-    fetchLogs();
-    setInterval(pollProgress, 1500);
-    setInterval(fetchLogs, 3000);
-  });
+document.addEventListener("DOMContentLoaded", () => {
+  pollProgress();
+  fetchLogs();
+  setInterval(pollProgress, 1500);
+  setInterval(fetchLogs, 3000);
+});
 </script>
 {% endblock %}

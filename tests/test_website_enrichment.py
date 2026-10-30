@@ -491,3 +491,178 @@ def test_14_existing_step1_and_step2_functionality_remains_intact(temp_db):
         row = conn.execute("SELECT website_status, official_website_url FROM places WHERE cid='cid_integ_01'").fetchone()
         assert row["website_status"] == "verified"
         assert row["official_website_url"] == "https://www.integbiz.com"
+
+
+# =========================================================================
+# REGRESSION TESTS: Address Normalization & Pipeline Crash Fix
+# =========================================================================
+
+def test_15_address_normalization_normal_string():
+    """Test 15: String addresses are preserved and cleaned correctly."""
+    addr = "123 Main St, New York, NY 10001"
+    normalized = WebsiteExtractor._normalize_address(addr)
+    assert normalized == ["123 Main St, New York, NY 10001"]
+
+    html_addr = "<p>456 Broadway &amp; Broome St, New York</p>"
+    norm_html = WebsiteExtractor._normalize_address(html_addr)
+    assert norm_html == ["456 Broadway & Broome St, New York"]
+
+
+def test_16_address_normalization_dictionary():
+    """Test 16: Flat dictionary addresses with standard Schema.org keys are formatted properly."""
+    addr_dict = {
+        "streetAddress": "123 Main St",
+        "addressLocality": "New York",
+        "addressRegion": "NY",
+        "postalCode": "10001",
+        "addressCountry": "US"
+    }
+    normalized = WebsiteExtractor._normalize_address(addr_dict)
+    assert len(normalized) == 1
+    assert normalized[0] == "123 Main St, New York, NY, 10001, US"
+
+
+def test_17_address_normalization_nested_dictionary():
+    """Test 17: Schema.org addresses with nested Country/State objects do not raise TypeError."""
+    addr_nested = {
+        "streetAddress": "15 William St",
+        "addressLocality": "New York",
+        "addressRegion": {
+            "@type": "State",
+            "name": "NY"
+        },
+        "postalCode": 10005,
+        "addressCountry": {
+            "@type": "Country",
+            "name": "United States"
+        }
+    }
+    normalized = WebsiteExtractor._normalize_address(addr_nested)
+    assert len(normalized) == 1
+    # Must format cleanly and NOT contain raw Python dict string representations
+    assert normalized[0] == "15 William St, New York, NY, 10005, United States"
+    assert "{'name'" not in normalized[0]
+    assert "{'@type'" not in normalized[0]
+
+
+def test_18_address_normalization_missing_fields_and_none():
+    """Test 18: Handles missing, partial, None, and unknown fields safely."""
+    # None input
+    assert WebsiteExtractor._normalize_address(None) == []
+    assert WebsiteExtractor._normalize_address("") == []
+    assert WebsiteExtractor._normalize_address({}) == []
+
+    # Partial fields
+    partial_1 = {"addressLocality": "Miami", "addressRegion": "FL"}
+    assert WebsiteExtractor._normalize_address(partial_1) == ["Miami, FL"]
+
+    # None values inside dictionary
+    partial_2 = {
+        "streetAddress": None,
+        "addressLocality": "Austin",
+        "addressRegion": None,
+        "addressCountry": None
+    }
+    assert WebsiteExtractor._normalize_address(partial_2) == ["Austin"]
+
+    # Unknown dictionary with no recognizable address fields
+    unknown = {"some_metadata": 12345, "unrelated_obj": {"nested": "value"}}
+    assert WebsiteExtractor._normalize_address(unknown) == []
+
+
+def test_19_address_normalization_mixed_components():
+    """Test 19: Handles lists with mixed string, multi-line street, and dict address components."""
+    mixed_list = [
+        "100 Broadway, New York, NY",
+        {
+            "streetAddress": ["200 Wall St", "Suite 400"],
+            "addressLocality": "New York",
+            "addressRegion": "NY",
+            "postalCode": "10005",
+            "addressCountry": {"name": "USA"}
+        }
+    ]
+    normalized = WebsiteExtractor._normalize_address(mixed_list)
+    assert len(normalized) == 2
+    assert normalized[0] == "100 Broadway, New York, NY"
+    assert normalized[1] == "200 Wall St, Suite 400, New York, NY, 10005, USA"
+
+
+def test_20_full_website_extractor_with_original_failing_scenario():
+    """
+    Test 20: Full WebsiteExtractor.extract() execution with the representative business
+    record (Paris Baguette / Schema.org nested Country dict) that triggered TypeError
+    in pipeline run pipe_1792741222.
+    """
+    business = {
+        "cid": "1514172223085081462",
+        "name": "Paris Baguette",
+        "primary_type": "bakery",
+        "formatted_address": "15 William St, New York, NY 10005",
+        "country_code": "US",
+        "region": "NY"
+    }
+
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Paris Baguette - New York, NY</title>
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "Bakery",
+            "name": "Paris Baguette",
+            "description": "Bakery cafe specializing in French-inspired pastries, cakes, and coffee.",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "15 William St",
+                "addressLocality": "New York",
+                "addressRegion": "NY",
+                "postalCode": "10005",
+                "addressCountry": {
+                    "@type": "Country",
+                    "name": "United States"
+                }
+            }
+        }
+        </script>
+    </head>
+    <body>
+        <h1>Paris Baguette</h1>
+        <p>Bakery cafe offering freshly baked breads, pastries, gourmet sandwiches, and handcrafted beverages.</p>
+        <a href="mailto:contact@parisbaguette.com">Email Us</a>
+        <p>Call us at (212) 555-0199</p>
+    </body>
+    </html>
+    """
+
+    page = PageResponse(
+        url="https://parisbaguette.com/locations/ny/new-york/15-william-st/",
+        status_code=200,
+        html=html_content
+    )
+    crawled_pages = {page.url: page}
+
+    # Must complete without raising TypeError
+    extracted = WebsiteExtractor.extract(business, crawled_pages)
+
+    assert "profile" in extracted
+    assert "leaders" in extracted
+    assert "contacts" in extracted
+
+    profile = extracted["profile"]
+    assert profile["overview"] is not None
+    assert "locations" in profile
+    assert len(profile["locations"]) >= 1
+
+    # Verify all locations are clean strings and no raw dict string representations exist
+    for loc in profile["locations"]:
+        assert isinstance(loc, str)
+        assert "{'name'" not in loc
+        assert "{'@type'" not in loc
+
+    # Verify contact extracted
+    contacts = extracted["contacts"]
+    emails = [c["contact_value"] for c in contacts if c["contact_type"] == "email"]
+    assert "contact@parisbaguette.com" in emails

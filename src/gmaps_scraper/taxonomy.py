@@ -127,8 +127,20 @@ def parse_address(address: Optional[str]) -> Dict[str, Optional[str]]:
     last_cleaned = re_us_ca_uk_zip.sub('', last_comp).strip()
     last_cleaned = re.sub(r'^[^\w]+|[^\w]+$', '', last_cleaned).strip()
 
+    US_STATE_CODES = {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+    }
+
     country_match = None
-    if last_cleaned.lower() in alias_map:
+    # Special check: If last_cleaned is a 2-letter US state code and postal code is a 5-digit US zip,
+    # it is United States (not Canada for 'CA' or India for 'IN')
+    if found_postal and re.match(r'^\d{5}(?:-\d{4})?$', found_postal) and last_cleaned.upper() in US_STATE_CODES:
+        country_match = ("US", "United States")
+    elif last_cleaned.lower() in alias_map:
         country_match = alias_map[last_cleaned.lower()]
     elif last_comp.lower() in alias_map:
         country_match = alias_map[last_comp.lower()]
@@ -140,7 +152,10 @@ def parse_address(address: Optional[str]) -> Dict[str, Optional[str]]:
         penultimate = components[-2]
         pen_cleaned = re_us_ca_uk_zip.sub('', penultimate).strip()
         pen_cleaned = re.sub(r'^[^\w]+|[^\w]+$', '', pen_cleaned).strip()
-        if pen_cleaned.lower() in alias_map:
+        if found_postal and re.match(r'^\d{5}(?:-\d{4})?$', found_postal) and pen_cleaned.upper() in US_STATE_CODES:
+            country_match = ("US", "United States")
+            country_comp_idx = len(components) - 2
+        elif pen_cleaned.lower() in alias_map:
             country_match = alias_map[pen_cleaned.lower()]
             country_comp_idx = len(components) - 2
 
@@ -197,6 +212,11 @@ def enrich_place_dimensions(place: Dict[str, Any]) -> Dict[str, Any]:
     place["vertical_raw"] = vertical_raw
 
     address_info = parse_address(place.get("address"))
+    if place.get("country_code") == "US" and address_info.get("country_code") == "CA" and address_info.get("region") in ("CA", "California"):
+        address_info["country_code"] = "US"
+        address_info["country"] = "United States"
+        address_info["region"] = "CA"
+
     if address_info["country_code"] != "unknown" or not place.get("country_code"):
         place["country"] = address_info["country"]
         place["country_code"] = address_info["country_code"]

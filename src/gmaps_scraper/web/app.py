@@ -1,21 +1,29 @@
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
 from ..config import ScraperConfig, load_config
 from ..db import Database
-from ..export import export_stream_bytes
+from ..export import export_stream_bytes, list_all_state_exports, resolve_safe_export_path, export_state_complete_package
+from ..geo.boundaries import get_region_bounding_boxes
 from ..checkpoint import CheckpointManager
 from ..jobs import JobManager
 from ..geo.resolve import resolve_location, estimate_scrape_complexity
 from ..geo.nlparse import parse_natural_language_query
+from ..scope import get_target_countries, get_us_states, get_mexico_entities, validate_target_country
+from ..website import WebsiteDiscoveryService, WebsiteEnrichmentService
+from ..orchestrator import PipelineOrchestrator, PipelineConfig, DEFAULT_CATEGORIES
+from ..taxonomy import load_verticals
 
 def _parse_bool(val: Optional[Any]) -> Optional[bool]:
     if val is None:
@@ -52,6 +60,50 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
 
     app = FastAPI(title="Google Maps Scraper Local Dashboard", docs_url=None, redoc_url=None)
 
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        error_msgs = []
+        for e in errors:
+            loc = " -> ".join(str(l) for l in e.get("loc", []) if l != "body")
+            msg = e.get("msg", "invalid")
+            error_msgs.append(f"{loc}: {msg}" if loc else msg)
+        detail_msg = "; ".join(error_msgs) or "Invalid request parameters"
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail_msg, "errors": errors},
+        )
+
+    @app.exception_handler(ValidationError)
+    async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+        errors = exc.errors()
+        error_msgs = []
+        for e in errors:
+            loc = " -> ".join(str(l) for l in e.get("loc", []) if l != "body")
+            msg = e.get("msg", "invalid")
+            error_msgs.append(f"{loc}: {msg}" if loc else msg)
+        detail_msg = "; ".join(error_msgs) or "Invalid configuration"
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail_msg, "errors": errors},
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        if isinstance(exc, HTTPException):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=getattr(exc, "headers", None),
+            )
+        logging.getLogger("gmaps_scraper.web").exception(
+            f"Unhandled exception during {request.method} {request.url.path}: {exc}"
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An internal server error occurred while processing the request."},
+        )
+
     web_dir = Path(__file__).resolve().parent
     static_dir = web_dir / "static"
     templates_dir = web_dir / "templates"
@@ -62,6 +114,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
     checkpoint = CheckpointManager(db)
     job_manager = JobManager.get_instance(db, cfg)
     job_manager.start_worker()
+    orchestrator = PipelineOrchestrator.get_instance(db, cfg)
 
     @app.on_event("startup")
     async def on_startup():
@@ -96,6 +149,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         category: Optional[str] = None,
         vertical: Optional[List[str]] = Query(None),
         country: Optional[List[str]] = Query(None),
+        region: Optional[List[str]] = Query(None),
         city: Optional[List[str]] = Query(None),
         min_rating: Optional[float] = None,
         min_reviews: Optional[int] = None,
@@ -106,6 +160,9 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         has_reviews: Optional[str] = None,
         has_hours: Optional[str] = None,
         has_attributes: Optional[str] = None,
+        website_status: Optional[str] = None,
+        enrichment_status: Optional[str] = None,
+        missing_info: Optional[str] = None,
         job: Optional[str] = None,
         sort: str = "rating_desc",
         page: int = 1,
@@ -113,6 +170,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
     ):
         v_list = _parse_multi(vertical)
         c_list = _parse_multi(country)
+        r_list = _parse_multi(region)
         ci_list = _parse_multi(city)
 
         b_phone = _parse_bool(has_phone)
@@ -129,6 +187,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             category=category,
             vertical=v_list,
             country=c_list,
+            region=r_list,
             city=ci_list,
             job=job,
             min_rating=min_rating,
@@ -140,6 +199,9 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             has_reviews=b_reviews,
             has_hours=b_hours,
             has_attributes=b_attrs,
+            website_status=website_status,
+            enrichment_status=enrichment_status,
+            missing_info=missing_info,
             sort=sort,
             page=page,
             page_size=page_size
@@ -151,6 +213,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         if category: filter_params["category"] = category
         if v_list: filter_params["vertical"] = ",".join(v_list)
         if c_list: filter_params["country"] = ",".join(c_list)
+        if r_list: filter_params["region"] = ",".join(r_list)
         if ci_list: filter_params["city"] = ",".join(ci_list)
         if job: filter_params["job"] = job
         if min_rating is not None: filter_params["min_rating"] = str(min_rating)
@@ -162,6 +225,9 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         if has_reviews: filter_params["has_reviews"] = has_reviews
         if has_hours: filter_params["has_hours"] = has_hours
         if has_attributes: filter_params["has_attributes"] = has_attributes
+        if website_status: filter_params["website_status"] = website_status
+        if enrichment_status: filter_params["enrichment_status"] = enrichment_status
+        if missing_info: filter_params["missing_info"] = missing_info
 
         return templates.TemplateResponse(
             request=request,
@@ -175,13 +241,16 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
                 "sort": sort,
                 "filters": {
                     "q": q, "status": status, "category": category,
-                    "vertical": v_list, "country": c_list, "city": ci_list,
+                    "vertical": v_list, "country": c_list, "region": r_list, "city": ci_list,
                     "job": job,
                     "min_rating": min_rating, "min_reviews": min_reviews,
                     "has_phone": b_phone, "has_website": b_web,
                     "has_photos": b_photos, "claimed": b_claimed,
                     "has_reviews": b_reviews, "has_hours": b_hours,
                     "has_attributes": b_attrs,
+                    "website_status": website_status,
+                    "enrichment_status": enrichment_status,
+                    "missing_info": missing_info
                 },
                 "filter_params": filter_params
             }
@@ -198,6 +267,64 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             context={"active_page": "places", "place": place}
         )
 
+    @app.get("/pipeline", response_class=HTMLResponse)
+    async def pipeline_view(request: Request):
+        verticals = load_verticals()
+        categories = []
+        for k, v in verticals.items():
+            if k == "other":
+                continue
+            lbl = v.get("label", k.title()) if isinstance(v, dict) else k.title()
+            categories.append({"key": k, "label": lbl})
+
+        saved_config = db.get_pipeline_config() or PipelineConfig().model_dump()
+        us_states_dict = {code: s.model_dump() for code, s in get_us_states().items()}
+        mexico_entities_dict = {code: e.model_dump() for code, e in get_mexico_entities().items()}
+
+        return templates.TemplateResponse(
+            request=request,
+            name="pipeline.html",
+            context={
+                "active_page": "pipeline",
+                "target_countries": get_target_countries(),
+                "us_states": us_states_dict,
+                "mexico_entities": mexico_entities_dict,
+                "stats": db.get_stats(),
+                "categories": categories,
+                "saved_config": saved_config,
+                "orchestrator_status": orchestrator.get_status(),
+            }
+        )
+
+    @app.get("/enrichment", response_class=HTMLResponse)
+    async def enrichment_view(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="enrichment.html",
+            context={
+                "active_page": "enrichment",
+                "stats": db.get_stats(),
+                "target_countries": get_target_countries(),
+                "us_states": get_us_states(),
+                "mexico_entities": get_mexico_entities(),
+            }
+        )
+
+    @app.get("/intelligence", response_class=HTMLResponse)
+    async def intelligence_view(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="intelligence.html",
+            context={
+                "active_page": "intelligence",
+                "summary": db.get_intelligence_summary(),
+                "stats": db.get_stats(),
+                "target_countries": get_target_countries(),
+                "us_states": get_us_states(),
+                "mexico_entities": get_mexico_entities(),
+            }
+        )
+
     @app.get("/map", response_class=HTMLResponse)
     async def map_view(request: Request):
         return templates.TemplateResponse(
@@ -208,11 +335,15 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
 
     @app.get("/runs", response_class=HTMLResponse)
     async def runs_view(request: Request):
+        jobs = db.list_jobs(limit=50)
+        with db.get_connection() as conn:
+            tasks = [dict(r) for r in conn.execute("SELECT * FROM collection_tasks ORDER BY updated_at DESC LIMIT 50").fetchall()]
         return templates.TemplateResponse(
             request=request,
             name="runs.html",
-            context={"active_page": "runs"}
+            context={"active_page": "runs", "jobs": jobs, "tasks": tasks}
         )
+
 
     @app.get("/quality", response_class=HTMLResponse)
     async def quality_view(request: Request):
@@ -222,6 +353,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             name="quality.html",
             context={"active_page": "quality", "quality": quality}
         )
+
 
     # -------------------------------------------------------------
     # JSON API Endpoints (All under /api)
@@ -342,6 +474,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         category: Optional[str] = None,
         vertical: Optional[List[str]] = Query(None),
         country: Optional[List[str]] = Query(None),
+        region: Optional[List[str]] = Query(None),
         city: Optional[List[str]] = Query(None),
         min_rating: Optional[float] = None,
         min_reviews: Optional[int] = None,
@@ -352,6 +485,9 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         has_reviews: Optional[str] = None,
         has_hours: Optional[str] = None,
         has_attributes: Optional[str] = None,
+        website_status: Optional[str] = None,
+        enrichment_status: Optional[str] = None,
+        missing_info: Optional[str] = None,
         job: Optional[str] = None,
         sort: str = "rating_desc",
         page: int = 1,
@@ -363,6 +499,7 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             category=category,
             vertical=_parse_multi(vertical),
             country=_parse_multi(country),
+            region=_parse_multi(region),
             city=_parse_multi(city),
             job=job,
             min_rating=min_rating,
@@ -374,6 +511,9 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
             has_reviews=_parse_bool(has_reviews),
             has_hours=_parse_bool(has_hours),
             has_attributes=_parse_bool(has_attributes),
+            website_status=website_status,
+            enrichment_status=enrichment_status,
+            missing_info=missing_info,
             sort=sort,
             page=page,
             page_size=page_size
@@ -420,6 +560,401 @@ def create_app(config: Optional[ScraperConfig] = None) -> FastAPI:
         with db.get_connection() as conn:
             rows = conn.execute("SELECT * FROM photos WHERE cid = ?", (cid,)).fetchall()
         return [dict(r) for r in rows]
+
+    @app.get("/api/scope/regions")
+    async def api_scope_regions(country_code: Optional[str] = None):
+        """Returns configured scope target countries and state/federal entity lists."""
+        target_countries = get_target_countries()
+        if country_code:
+            cc = country_code.upper().strip()
+            if cc == "US":
+                states = get_us_states()
+                return {"country": "US", "regions": [{"code": s.code, "name": s.name} for s in states.values()]}
+            elif cc == "MX":
+                entities = get_mexico_entities()
+                return {"country": "MX", "regions": [{"code": e.code, "name": e.name} for e in entities.values()]}
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported country {country_code}. Permitted: US, MX")
+        return {
+            "countries": list(target_countries.keys()),
+            "us_states": [{"code": s.code, "name": s.name} for s in get_us_states().values()],
+            "mexico_entities": [{"code": e.code, "name": e.name} for e in get_mexico_entities().values()]
+        }
+
+    @app.get("/api/enrichment/stats")
+    async def api_enrichment_stats(country_code: Optional[str] = None, region_code: Optional[str] = None):
+        """Returns official website verification and enrichment metrics from SQLite."""
+        return {
+            "discovery": db.get_website_discovery_stats(country_code=country_code, region_code=region_code),
+            "enrichment": db.get_enrichment_stats(country_code=country_code, region_code=region_code),
+        }
+
+    @app.get("/api/enrichment/items")
+    async def api_enrichment_items(
+        tab: str = "all",
+        country: Optional[str] = None,
+        region: Optional[str] = None,
+        q: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50
+    ):
+        """Returns places filtered for the dedicated Website Enrichment views."""
+        website_status = None
+        enrichment_status = None
+        missing_info = None
+
+        if tab == "verified":
+            website_status = "verified"
+        elif tab == "candidates":
+            website_status = "candidate"
+        elif tab == "needs_review":
+            website_status = "needs_review"
+        elif tab == "missing":
+            website_status = "website_missing"
+        elif tab == "failed":
+            website_status = "failed"
+        elif tab == "enriched":
+            enrichment_status = "completed"
+        elif tab == "profiles":
+            missing_info = None
+        elif tab == "leaders":
+            missing_info = None
+        elif tab == "contacts":
+            missing_info = None
+
+        c_list = [country.strip().upper()] if country else None
+        r_list = [region.strip().upper()] if region else None
+
+        places, total = db.query_places(
+            q=q,
+            country=c_list,
+            region=r_list,
+            website_status=website_status,
+            enrichment_status=enrichment_status,
+            missing_info=missing_info,
+            page=page,
+            page_size=page_size
+        )
+        return {"total": total, "page": page, "page_size": page_size, "items": places}
+
+    @app.post("/api/pipeline/run-discovery")
+    async def api_run_discovery(request: Request):
+        """Runs Step 2 Official Website Discovery & Verification workflow."""
+        body = await request.json()
+        country_code = str(body.get("country_code", "US")).strip().upper()
+        region_code = body.get("region_code") or None
+        if region_code:
+            region_code = str(region_code).strip().upper()
+        limit = int(body.get("limit", 50))
+        retry_failed = bool(body.get("retry_failed", False))
+        force = bool(body.get("force", False))
+        dry_run = bool(body.get("dry_run", False))
+
+        try:
+            validate_target_country(country_code)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        discovery_service = WebsiteDiscoveryService(db)
+        result = await discovery_service.run_discovery(
+            country_code=country_code,
+            region_code=region_code,
+            limit=limit,
+            retry_failed=retry_failed,
+            force=force,
+            dry_run=dry_run
+        )
+        return result
+
+    @app.post("/api/pipeline/run-enrichment")
+    async def api_run_enrichment(request: Request):
+        """Runs Step 3 Company Profile, Leadership, and Contact Extraction workflow."""
+        body = await request.json()
+        country_code = str(body.get("country_code", "US")).strip().upper()
+        region_code = body.get("region_code") or None
+        if region_code:
+            region_code = str(region_code).strip().upper()
+        limit = int(body.get("limit", 50))
+        max_pages = int(body.get("max_pages", 5))
+        retry_failed = bool(body.get("retry_failed", False))
+        force = bool(body.get("force", False))
+        dry_run = bool(body.get("dry_run", False))
+
+        try:
+            validate_target_country(country_code)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        enrichment_service = WebsiteEnrichmentService(db, max_pages=max_pages)
+        result = await enrichment_service.run_enrichment(
+            country_code=country_code,
+            region_code=region_code,
+            limit=limit,
+            max_pages=max_pages,
+            retry_failed=retry_failed,
+            force=force,
+            dry_run=dry_run
+        )
+        return result
+
+    @app.get("/api/intelligence")
+    async def api_get_intelligence(
+        cid: Optional[str] = None,
+        country: Optional[str] = None,
+        region: Optional[str] = None,
+        match_status: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50
+    ):
+        offset = (max(1, page) - 1) * page_size
+        findings, total = db.get_additional_intelligence(
+            cid=cid,
+            country_code=country,
+            region_code=region,
+            match_status=match_status,
+            entity_type=entity_type,
+            limit=page_size,
+            offset=offset
+        )
+        return {
+            "findings": findings,
+            "total_count": total,
+            "page": page,
+            "page_size": page_size
+        }
+
+    @app.get("/api/intelligence/summary")
+    async def api_get_intelligence_summary(
+        country: Optional[str] = None,
+        region: Optional[str] = None
+    ):
+        return db.get_intelligence_summary(country_code=country, region_code=region)
+
+    @app.get("/api/intelligence/sources")
+    async def api_get_intelligence_sources(
+        cid: Optional[str] = None,
+        limit: int = 50
+    ):
+        return {"sources": db.get_intelligence_sources(cid=cid, limit=limit)}
+
+    @app.get("/api/storage/status")
+    async def api_storage_status():
+        """Returns storage status including central DB, regional DBs, and exports."""
+        from ..storage import RegionalStorageManager
+        mgr = RegionalStorageManager(db, cfg)
+        return mgr.get_storage_status()
+
+    @app.get("/api/storage/databases")
+    async def api_storage_databases(country: Optional[str] = None):
+        """Returns the list of state-wise SQLite databases."""
+        from ..storage import RegionalStorageManager
+        mgr = RegionalStorageManager(db, cfg)
+        status = mgr.get_storage_status()
+        dbs = status.get("regional_databases", [])
+        if country:
+            dbs = [d for d in dbs if d.get("country_code", "").upper() == country.upper()]
+        return {"databases": dbs, "count": len(dbs)}
+
+    @app.post("/api/pipeline/run-incremental-enrichment")
+    async def api_run_incremental_enrichment(request: Request):
+        """Runs Incremental Business Intelligence Enrichment workflow."""
+        from ..incremental.service import IncrementalEnrichmentService
+        body = await request.json()
+        country_code = str(body.get("country_code", "US")).strip().upper()
+        region_code = body.get("region_code") or None
+        if region_code:
+            region_code = str(region_code).strip().upper()
+        limit = int(body.get("limit", 20))
+        max_pages = int(body.get("max_pages", 5))
+        source_types = body.get("source_types") or ["all"]
+        retry_failed = bool(body.get("retry_failed", False))
+        force = bool(body.get("force", False))
+        dry_run = bool(body.get("dry_run", False))
+
+        try:
+            validate_target_country(country_code)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        inc_service = IncrementalEnrichmentService(
+            db=db,
+            max_pages=max_pages,
+            source_types=source_types
+        )
+        result = await inc_service.run_incremental_enrichment(
+            country_code=country_code,
+            region_code=region_code,
+            limit=limit,
+            max_pages=max_pages,
+            retry_failed=retry_failed,
+            force=force,
+            dry_run=dry_run
+        )
+        return result
+
+    @app.get("/api/pipeline/config")
+    async def api_pipeline_get_config():
+        """Returns persisted user pipeline configuration or default config."""
+        cfg_data = db.get_pipeline_config()
+        if not cfg_data:
+            cfg_data = PipelineConfig().model_dump()
+        return cfg_data
+
+    @app.post("/api/pipeline/config")
+    async def api_pipeline_save_config(config: PipelineConfig):
+        """Saves user pipeline configuration so it persists across restarts."""
+        try:
+            db.save_pipeline_config(config.model_dump())
+            return {"status": "saved", "config": config.model_dump()}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/pipeline/plan")
+    async def api_pipeline_plan(config: PipelineConfig):
+        """Generates deterministic execution order and plan before starting."""
+        try:
+            plan = orchestrator.preview_plan(config)
+            return plan
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/pipeline/start")
+    async def api_pipeline_start(config: Optional[PipelineConfig] = None):
+        """Starts automated state-by-state pipeline run."""
+        if config is None:
+            saved = db.get_pipeline_config()
+            try:
+                config = PipelineConfig(**saved) if saved else PipelineConfig()
+            except Exception:
+                config = PipelineConfig()
+
+        try:
+            run_id = await orchestrator.start(config)
+            return {"status": "started", "run_id": run_id}
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/pipeline/pause")
+    async def api_pipeline_pause():
+        """Pauses the active pipeline run."""
+        success = orchestrator.pause()
+        if not success:
+            raise HTTPException(status_code=400, detail="No active pipeline run to pause.")
+        return {"status": "paused"}
+
+    @app.post("/api/pipeline/resume")
+    async def api_pipeline_resume():
+        """Resumes a paused pipeline run."""
+        success = orchestrator.resume()
+        if not success:
+            raise HTTPException(status_code=400, detail="No paused pipeline run to resume.")
+        return {"status": "resumed"}
+
+    @app.post("/api/pipeline/cancel")
+    async def api_pipeline_cancel():
+        """Cancels the active pipeline run."""
+        success = orchestrator.cancel()
+        if not success:
+            raise HTTPException(status_code=400, detail="No active pipeline run to cancel.")
+        return {"status": "cancelled"}
+
+    @app.post("/api/pipeline/retry-failed")
+    async def api_pipeline_retry_failed():
+        """Resets failed collection tasks for retry."""
+        count = orchestrator.retry_failed()
+        return {"status": "retried", "reset_count": count}
+
+    @app.get("/api/pipeline/status")
+    async def api_pipeline_status():
+        """Returns live orchestrator status, stage, current state, counts, and metrics."""
+        return orchestrator.get_status()
+
+    @app.get("/api/pipeline/events")
+    async def api_pipeline_events():
+        """SSE stream for real-time progress updates on the pipeline."""
+        q = orchestrator.subscribe()
+
+        async def event_generator():
+            try:
+                initial = {"event": "init", "data": orchestrator.get_status()}
+                yield f"data: {json.dumps(initial)}\n\n"
+                while True:
+                    msg = await q.get()
+                    yield f"data: {json.dumps(msg)}\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                orchestrator.unsubscribe(q)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    @app.get("/api/pipeline/tiles")
+    async def api_pipeline_tiles(
+        country: Optional[str] = None,
+        region: Optional[str] = None,
+        category: Optional[str] = None,
+        status: Optional[str] = None,
+        run_id: Optional[str] = None,
+        limit: int = 2000
+    ):
+        """Returns geographic tiles with metrics and counts for canvas map rendering."""
+        tiles = db.get_geographic_tiles(
+            country_code=country,
+            region_code=region,
+            category=category,
+            status=status,
+            run_id=run_id,
+            limit=limit
+        )
+        tile_counts = db.get_pipeline_tile_counts(
+            run_id=run_id,
+            country_code=country,
+            region_code=region
+        )
+        return {"tiles": tiles, "counts": tile_counts}
+
+    @app.get("/api/pipeline/boundaries")
+    async def api_pipeline_boundaries(
+        country: str = "US",
+        region: str = "AK"
+    ):
+        """Returns verified boundary bounding boxes for territory canvas framing."""
+        try:
+            boxes = get_region_bounding_boxes(country, region)
+            return [b.to_dict() for b in boxes]
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.get("/api/pipeline/exports")
+    async def api_pipeline_exports():
+        """Returns list of organized state exports and their run summaries."""
+        exports = list_all_state_exports(cfg.absolute_exports_dir)
+        return {"exports": exports}
+
+    @app.get("/api/pipeline/exports/download")
+    async def api_pipeline_export_download(path: str = Query(..., description="Relative export file path")):
+        """Safe export file download guarded against directory traversal."""
+        try:
+            file_path = resolve_safe_export_path(cfg.absolute_exports_dir, path)
+        except PermissionError as pe:
+            raise HTTPException(status_code=403, detail=str(pe))
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Requested export file does not exist.")
+
+        media_type = "text/csv" if file_path.suffix == ".csv" else "application/json" if file_path.suffix == ".json" else "text/plain"
+        return FileResponse(
+            str(file_path),
+            media_type=media_type,
+            filename=file_path.name
+        )
 
     @app.get("/api/map")
     async def api_map_points(

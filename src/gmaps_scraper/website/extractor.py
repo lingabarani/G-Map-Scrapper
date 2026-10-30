@@ -1,8 +1,11 @@
 import json
+import logging
 import re
 import html
 import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Role mapping patterns
 ROLE_PATTERNS = [
@@ -73,8 +76,9 @@ class WebsiteExtractor:
 
         # Check existing place address for locations
         existing_address = business.get("formatted_address") or business.get("address")
-        if existing_address and existing_address not in locations:
-            locations.append(existing_address)
+        for norm_addr in cls._normalize_address(existing_address):
+            if norm_addr and norm_addr not in locations:
+                locations.append(norm_addr)
 
         for url, page in pages.items():
             html_content = page.html
@@ -89,27 +93,33 @@ class WebsiteExtractor:
             for block in json_ld_blocks:
                 b_type = block.get("@type", "")
                 if isinstance(b_type, list):
-                    b_type = " ".join(b_type)
+                    b_type = " ".join(str(t) for t in b_type if t)
 
-                if any(t in str(b_type).lower() for t in ("organization", "localbusiness", "corporation", "store", "restaurant")):
+                # Standalone PostalAddress block
+                if "postaladdress" in str(b_type).lower():
+                    for norm_addr in cls._normalize_address(block):
+                        if norm_addr and norm_addr not in locations:
+                            locations.append(norm_addr)
+
+                if any(t in str(b_type).lower() for t in ("organization", "localbusiness", "corporation", "store", "restaurant", "bakery", "cafe", "establishment", "service")):
                     if not overview and block.get("description"):
                         overview = cls._clean_text(block["description"])
                     if not industry and block.get("knowsAbout"):
                         knows = block["knowsAbout"]
-                        industry = ", ".join(knows) if isinstance(knows, list) else str(knows)
+                        industry = ", ".join(str(k) for k in knows if k) if isinstance(knows, list) else str(knows)
 
-                    # PostalAddress
+                    # PostalAddress or nested address
                     addr = block.get("address")
-                    if isinstance(addr, dict):
-                        addr_str = ", ".join(filter(None, [
-                            addr.get("streetAddress"),
-                            addr.get("addressLocality"),
-                            addr.get("addressRegion"),
-                            addr.get("postalCode"),
-                            addr.get("addressCountry")
-                        ]))
-                        if addr_str and addr_str not in locations:
-                            locations.append(addr_str)
+                    for norm_addr in cls._normalize_address(addr):
+                        if norm_addr and norm_addr not in locations:
+                            locations.append(norm_addr)
+
+                    # Also check location field if present
+                    loc_val = block.get("location")
+                    if loc_val:
+                        for norm_addr in cls._normalize_address(loc_val):
+                            if norm_addr and norm_addr not in locations:
+                                locations.append(norm_addr)
 
             # Overview from meta tags if not already found
             if not overview:
@@ -467,3 +477,121 @@ class WebsiteExtractor:
             if 3 <= len(clean) <= 60 and clean not in items:
                 items.append(clean)
         return items
+
+    @classmethod
+    def _extract_text_field(cls, val: Any) -> Optional[str]:
+        """
+        Safely extracts a clean string from a string, number, dict, or list.
+        Prevents returning raw dictionary string representations like {'name': 'US'}.
+        """
+        if val is None:
+            return None
+        if isinstance(val, str):
+            cleaned = cls._clean_text(val)
+            return cleaned if cleaned else None
+        if isinstance(val, (int, float)):
+            return str(val).strip() or None
+        if isinstance(val, (list, tuple, set)):
+            sub_strs = [s for s in (cls._extract_text_field(item) for item in val) if s]
+            return ", ".join(sub_strs) if sub_strs else None
+        if isinstance(val, dict):
+            # Check common keys for Schema.org or general nested objects (e.g. Country, State)
+            for key in ("name", "text", "@value", "value", "addressCountry", "addressRegion", "addressLocality", "identifier", "code"):
+                if key in val and val[key] is not None:
+                    candidate = cls._extract_text_field(val[key])
+                    if candidate:
+                        return candidate
+            # If it's a dict that might contain street/city/state directly
+            nested_parts: List[str] = []
+            for sub_key in ("streetAddress", "street", "addressLocality", "city", "addressRegion", "state", "postalCode", "zip", "addressCountry", "country"):
+                if sub_key in val and val[sub_key] is not None:
+                    sub_val = cls._extract_text_field(val[sub_key])
+                    if sub_val:
+                        nested_parts.append(sub_val)
+            if nested_parts:
+                return ", ".join(nested_parts)
+
+            logger.debug("Unexpected dictionary format in address field with keys: %s", list(val.keys()))
+            return None
+
+        logger.debug("Unexpected type for address field: %s", type(val).__name__)
+        return None
+
+    @classmethod
+    def _normalize_address(cls, addr: Any) -> List[str]:
+        """
+        Safely normalizes various address formats (str, dict, list, None)
+        into a list of clean, human-readable address strings.
+        Handles Schema.org PostalAddress, nested Country/State objects,
+        and missing or partial fields without crashing or producing raw dict strings.
+        """
+        if not addr:
+            return []
+
+        if isinstance(addr, str):
+            cleaned = cls._clean_text(addr)
+            return [cleaned] if cleaned else []
+
+        if isinstance(addr, (list, tuple, set)):
+            res: List[str] = []
+            for item in addr:
+                for norm in cls._normalize_address(item):
+                    if norm and norm not in res:
+                        res.append(norm)
+            return res
+
+        if isinstance(addr, dict):
+            # If the dict contains a nested address object (e.g. {"address": {...}})
+            if "address" in addr and isinstance(addr["address"], (dict, list, str)):
+                nested_res = cls._normalize_address(addr["address"])
+                if nested_res:
+                    return nested_res
+
+            # 1. Check for PostalAddress structured components
+            street = cls._extract_text_field(
+                addr.get("streetAddress") or addr.get("street") or addr.get("addressLine1") or addr.get("street_address")
+            )
+            extended = cls._extract_text_field(
+                addr.get("addressLine2") or addr.get("extendedAddress") or addr.get("suite")
+            )
+            if street and extended:
+                street = f"{street}, {extended}"
+            elif extended:
+                street = extended
+
+            locality = cls._extract_text_field(
+                addr.get("addressLocality") or addr.get("locality") or addr.get("city") or addr.get("town")
+            )
+            region = cls._extract_text_field(
+                addr.get("addressRegion") or addr.get("region") or addr.get("state") or addr.get("province")
+            )
+            postal_code = cls._extract_text_field(
+                addr.get("postalCode") or addr.get("postal_code") or addr.get("postcode") or addr.get("zip") or addr.get("zipcode")
+            )
+            country = cls._extract_text_field(
+                addr.get("addressCountry") or addr.get("country") or addr.get("country_code")
+            )
+
+            parts = [street, locality, region, postal_code, country]
+            valid_parts = [p.strip().rstrip(",") for p in parts if p and p.strip()]
+
+            if valid_parts:
+                # Deduplicate adjacent identical components if any
+                deduped: List[str] = []
+                for p in valid_parts:
+                    if not deduped or p.lower() != deduped[-1].lower():
+                        deduped.append(p)
+                return [", ".join(deduped)]
+
+            # 2. Check for fallback full-address keys if structured fields were missing
+            for fallback_key in ("formatted_address", "full_address", "name", "text"):
+                if fallback_key in addr:
+                    val = cls._extract_text_field(addr[fallback_key])
+                    if val:
+                        return [val]
+
+            logger.debug("Could not extract postal address from dictionary with keys: %s", list(addr.keys()))
+            return []
+
+        logger.debug("Unexpected address format type: %s", type(addr).__name__)
+        return []

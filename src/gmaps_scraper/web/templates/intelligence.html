@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+
+{% block title %}Additional Business Intelligence — Incremental Pipeline | GMaps Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header">
+  <div>
+    <h1 class="view-title">Incremental Business Intelligence</h1>
+    <div class="view-subtitle">
+      Public-source discovery, automated candidate normalization, duplicate prevention, and source evidence provenance
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button class="btn btn-secondary btn-sm" onclick="refreshSummary()">Refresh Metrics</button>
+    <a href="/pipeline" class="btn btn-primary btn-sm">Pipeline Control</a>
+  </div>
+</div>
+
+<!-- KPI Summary Cards -->
+<div class="kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;margin-bottom:20px;">
+  <div class="kpi-card" style="border-left:4px solid #10b981;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">New Findings</div>
+    <div class="kpi-value" id="kpiNewFindings" style="font-size:24px;font-weight:700;color:#10b981;margin-top:4px;">
+      {{ summary.new_findings }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Genuinely new fields</div>
+  </div>
+
+  <div class="kpi-card" style="border-left:4px solid #3b82f6;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">Duplicates Prevented</div>
+    <div class="kpi-value" id="kpiDuplicatesPrevented" style="font-size:24px;font-weight:700;color:#3b82f6;margin-top:4px;">
+      {{ summary.exact_matches }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Exact DB matches</div>
+  </div>
+
+  <div class="kpi-card" style="border-left:4px solid #ef4444;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">Conflicts &amp; Review</div>
+    <div class="kpi-value" id="kpiConflicts" style="font-size:24px;font-weight:700;color:#ef4444;margin-top:4px;">
+      {{ summary.conflicts + summary.possible_matches }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Discrepancies flagged</div>
+  </div>
+
+  <div class="kpi-card" style="border-left:4px solid #06b6d4;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">New Leaders</div>
+    <div class="kpi-value" id="kpiNewLeaders" style="font-size:24px;font-weight:700;color:#06b6d4;margin-top:4px;">
+      {{ summary.new_leaders }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Executives &amp; directors</div>
+  </div>
+
+  <div class="kpi-card" style="border-left:4px solid #8b5cf6;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">New Contacts</div>
+    <div class="kpi-value" id="kpiNewContacts" style="font-size:24px;font-weight:700;color:#8b5cf6;margin-top:4px;">
+      {{ summary.new_contacts }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Verified emails &amp; phones</div>
+  </div>
+
+  <div class="kpi-card" style="border-left:4px solid #64748b;">
+    <div class="kpi-label" style="font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600;">Sources Checked</div>
+    <div class="kpi-value" id="kpiSourcesChecked" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">
+      {{ summary.sources_checked }}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+      <span style="color:#10b981;">{{ summary.sources_succeeded }} ok</span> &bull; 
+      <span style="color:#ef4444;">{{ summary.sources_failed }} failed</span>
+    </div>
+  </div>
+</div>
+
+<!-- Tabbed Match Status Filters -->
+<div style="display:flex;gap:6px;margin-bottom:16px;overflow-x:auto;padding-bottom:6px;border-bottom:1px solid var(--border-subtle);">
+  <button class="btn btn-sm btn-secondary active-subtab" data-status="" onclick="selectStatusTab('', this)">
+    All Findings
+  </button>
+  <button class="btn btn-sm btn-secondary" data-status="NEW_INFORMATION" onclick="selectStatusTab('NEW_INFORMATION', this)">
+    New Information
+  </button>
+  <button class="btn btn-sm btn-secondary" data-status="EXACT_MATCH" onclick="selectStatusTab('EXACT_MATCH', this)">
+    Exact Matches
+  </button>
+  <button class="btn btn-sm btn-secondary" data-status="CONFLICT" onclick="selectStatusTab('CONFLICT', this)">
+    Conflicts
+  </button>
+  <button class="btn btn-sm btn-secondary" data-status="POSSIBLE_MATCH" onclick="selectStatusTab('POSSIBLE_MATCH', this)">
+    Possible Matches
+  </button>
+  <button class="btn btn-sm btn-secondary" data-status="UNVERIFIED" onclick="selectStatusTab('UNVERIFIED', this)">
+    Unverified
+  </button>
+</div>
+
+<!-- Search & Filtering Bar -->
+<div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
+  <input type="text" id="intelSearch" placeholder="Search business, person, title, or value..."
+    class="rail-search-input" style="width:280px;margin:0;" onkeydown="if(event.key==='Enter') loadFindings()">
+
+  <select id="intelEntityType" class="rail-search-input" style="width:140px;margin:0;" onchange="loadFindings()">
+    <option value="">All Entities</option>
+    <option value="leader">Executive Leader</option>
+    <option value="contact">Business Contact</option>
+    <option value="profile">Profile Overview</option>
+    <option value="service">Service Offering</option>
+    <option value="location">Operating Location</option>
+    <option value="registry">Public Registry</option>
+  </select>
+
+  <select id="intelCountry" class="rail-search-input" style="width:140px;margin:0;" onchange="loadFindings()">
+    <option value="">All Countries</option>
+    <option value="US">USA (US)</option>
+    <option value="MX">Mexico (MX)</option>
+  </select>
+
+  <input type="text" id="intelRegion" placeholder="Region (e.g. AK, WY)"
+    class="rail-search-input" style="width:130px;margin:0;text-transform:uppercase;" onkeydown="if(event.key==='Enter') loadFindings()">
+
+  <button class="btn btn-primary btn-sm" onclick="loadFindings()">Apply Filter</button>
+  <button class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset</button>
+
+  <span id="intelStatusText" style="font-size:12px;color:var(--text-muted);margin-left:auto;">Loading...</span>
+</div>
+
+<!-- Findings Data Table -->
+<div class="table-card">
+  <div class="table-wrap full-data-mode">
+    <table class="data-table" id="intelTable">
+      <thead>
+        <tr>
+          <th>Business Name</th>
+          <th>Entity</th>
+          <th>Person / Target</th>
+          <th>Job Title</th>
+          <th>Field</th>
+          <th>Discovered Value</th>
+          <th>Match Status</th>
+          <th>Confidence</th>
+          <th>Source Evidence</th>
+          <th>Last Checked</th>
+        </tr>
+      </thead>
+      <tbody id="intelTableBody">
+        <tr>
+          <td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">
+            Loading incremental intelligence records...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination Footer -->
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:0 4px;">
+  <span id="paginationInfo" style="font-size:12px;color:var(--text-muted);">Showing 0 items</span>
+  <div style="display:flex;gap:6px;">
+    <button id="prevPageBtn" class="btn btn-secondary btn-sm" onclick="changePage(-1)" disabled>&larr; Previous</button>
+    <button id="nextPageBtn" class="btn btn-secondary btn-sm" onclick="changePage(1)" disabled>Next &rarr;</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentStatus = '';
+  let currentPage = 1;
+  const pageSize = 50;
+
+  function selectStatusTab(status, btn) {
+    currentStatus = status;
+    currentPage = 1;
+    document.querySelectorAll('[data-status]').forEach(b => b.classList.remove('active-subtab'));
+    if (btn) btn.classList.add('active-subtab');
+    loadFindings();
+  }
+
+  function resetFilters() {
+    document.getElementById('intelSearch').value = '';
+    document.getElementById('intelEntityType').value = '';
+    document.getElementById('intelCountry').value = '';
+    document.getElementById('intelRegion').value = '';
+    currentStatus = '';
+    currentPage = 1;
+    document.querySelectorAll('[data-status]').forEach(b => b.classList.remove('active-subtab'));
+    const defaultBtn = document.querySelector('[data-status=""]');
+    if (defaultBtn) defaultBtn.classList.add('active-subtab');
+    loadFindings();
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    if (currentPage < 1) currentPage = 1;
+    loadFindings();
+  }
+
+  async function refreshSummary() {
+    try {
+      const resp = await fetch('/api/intelligence/summary');
+      if (resp.ok) {
+        const s = await resp.json();
+        document.getElementById('kpiNewFindings').textContent = s.new_findings || 0;
+        document.getElementById('kpiDuplicatesPrevented').textContent = s.exact_matches || 0;
+        document.getElementById('kpiConflicts').textContent = (s.conflicts || 0) + (s.possible_matches || 0);
+        document.getElementById('kpiNewLeaders').textContent = s.new_leaders || 0;
+        document.getElementById('kpiNewContacts').textContent = s.new_contacts || 0;
+        document.getElementById('kpiSourcesChecked').textContent = s.sources_checked || 0;
+      }
+    } catch (e) {
+      console.warn("Could not refresh summary:", e);
+    }
+  }
+
+  async function loadFindings() {
+    const statusText = document.getElementById('intelStatusText');
+    const tbody = document.getElementById('intelTableBody');
+    statusText.textContent = "Loading findings...";
+
+    const entityType = document.getElementById('intelEntityType').value;
+    const country = document.getElementById('intelCountry').value;
+    const region = document.getElementById('intelRegion').value.trim();
+    const search = document.getElementById('intelSearch').value.trim();
+
+    const params = new URLSearchParams({
+      page: currentPage,
+      page_size: pageSize
+    });
+    if (currentStatus) params.append('match_status', currentStatus);
+    if (entityType) params.append('entity_type', entityType);
+    if (country) params.append('country', country);
+    if (region) params.append('region', region);
+    if (search) params.append('q', search);
+
+    try {
+      const resp = await fetch(`/api/intelligence?${params.toString()}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      const items = data.findings || [];
+      const total = data.total_count || 0;
+
+      statusText.textContent = `Found ${total} record(s)`;
+      document.getElementById('paginationInfo').textContent =
+        `Showing ${(currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, total)} of ${total}`;
+
+      document.getElementById('prevPageBtn').disabled = (currentPage <= 1);
+      document.getElementById('nextPageBtn').disabled = (currentPage * pageSize >= total);
+
+      if (items.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="10" style="text-align:center;padding:36px;color:var(--text-muted);">
+              No incremental intelligence findings match the selected filter.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = items.map(item => {
+        let badgeColor = '#64748b';
+        let badgeBg = 'rgba(100, 116, 139, 0.15)';
+        if (item.match_status === 'NEW_INFORMATION') {
+          badgeColor = '#10b981';
+          badgeBg = 'rgba(16, 185, 129, 0.15)';
+        } else if (item.match_status === 'EXACT_MATCH') {
+          badgeColor = '#3b82f6';
+          badgeBg = 'rgba(59, 130, 246, 0.15)';
+        } else if (item.match_status === 'CONFLICT') {
+          badgeColor = '#ef4444';
+          badgeBg = 'rgba(239, 68, 68, 0.15)';
+        } else if (item.match_status === 'POSSIBLE_MATCH') {
+          badgeColor = '#f59e0b';
+          badgeBg = 'rgba(245, 158, 11, 0.15)';
+        }
+
+        const conflictHtml = item.conflict_existing_value ?
+          `<div style="font-size:10px;color:#ef4444;margin-top:2px;">Existing: ${escapeHtml(item.conflict_existing_value)}</div>` : '';
+
+        const sourceLink = item.source_url ?
+          `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:11px;" title="${escapeHtml(item.source_url)}">
+            ${escapeHtml(item.source_type || 'web')} &nearr;
+          </a>` : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
+
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:600;color:var(--text-primary);">${escapeHtml(item.place_name || item.company_name || 'Business')}</div>
+              <div style="font-size:10px;color:var(--text-muted);font-family:monospace;">CID: ${escapeHtml(item.cid)}</div>
+            </td>
+            <td>
+              <span class="badge" style="background:var(--bg-card-hover);color:var(--text-secondary);font-size:11px;">
+                ${escapeHtml(item.entity_type)}
+              </span>
+            </td>
+            <td>${escapeHtml(item.person_name || '—')}</td>
+            <td style="color:var(--text-secondary);font-size:12px;">${escapeHtml(item.job_title || '—')}</td>
+            <td style="font-family:monospace;font-size:11px;color:var(--accent);">${escapeHtml(item.field_name)}</td>
+            <td style="max-width:260px;word-break:break-word;">
+              <span style="font-weight:500;">${escapeHtml(item.field_value)}</span>
+              ${conflictHtml}
+            </td>
+            <td>
+              <span class="badge" style="background:${badgeBg};color:${badgeColor};font-weight:600;font-size:10px;padding:3px 8px;border-radius:4px;">
+                ${escapeHtml(item.match_status)}
+              </span>
+            </td>
+            <td style="font-size:11px;color:var(--text-muted);">${(item.confidence * 100).toFixed(0)}%</td>
+            <td>${sourceLink}</td>
+            <td style="font-size:11px;color:var(--text-muted);white-space:nowrap;">
+              ${item.last_checked_at ? item.last_checked_at.split('T')[0] : '—'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+    } catch (e) {
+      statusText.textContent = `Error: ${e.message}`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center;padding:24px;color:#ef4444;">
+            Failed to load findings: ${escapeHtml(e.message)}
+          </td>
+        </tr>
+      `;
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadFindings();
+  });
+</script>
+{% endblock %}

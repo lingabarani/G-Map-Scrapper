@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}GMap Scraper Local Dashboard{% endblock %}</title>
+  <title>{% block title %}Business Intelligence Pipeline | GMaps Scraper{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -11,24 +11,30 @@
   <!-- Top Navigation Header -->
   <header class="top-nav">
     <div style="display:flex;align-items:center;gap:16px;">
-      <a href="/" class="brand">
+      <a href="/" class="brand" style="text-decoration:none;display:flex;align-items:center;gap:10px;">
         <span class="brand-badge">LOCAL</span>
-        <span>GMaps Scraper</span>
+        <div class="brand-title-wrap">
+          <span class="brand-title">Business Intelligence Pipeline</span>
+          <span class="brand-subtitle">Business discovery, official website verification, and company information enrichment</span>
+        </div>
         <span class="offline-indicator">
           <span class="dot"></span> 100% Offline
         </span>
       </a>
 
       <nav class="nav-links">
-        <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Overview</a>
+        <a href="/places" class="nav-link {% if active_page == 'places' %}active{% endif %}">Business Explorer</a>
+        <a href="/pipeline" class="nav-link {% if active_page == 'pipeline' %}active{% endif %}">Pipeline Control</a>
+        <a href="/enrichment" class="nav-link {% if active_page == 'enrichment' %}active{% endif %}">Website Enrichment</a>
+        <a href="/intelligence" class="nav-link {% if active_page == 'intelligence' %}active{% endif %}">Additional Intelligence</a>
         <a href="/live" class="nav-link {% if active_page == 'live' %}active{% endif %}" style="display:inline-flex;align-items:center;gap:6px;">
           <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span>
           Live Search
         </a>
-        <a href="/places" class="nav-link {% if active_page == 'places' %}active{% endif %}">Places</a>
         <a href="/map" class="nav-link {% if active_page == 'map' %}active{% endif %}">Map</a>
         <a href="/runs" class="nav-link {% if active_page == 'runs' %}active{% endif %}">Runs & Logs</a>
-        <a href="/quality" class="nav-link {% if active_page == 'quality' %}active{% endif %}">Quality</a>
+        <a href="/quality" class="nav-link {% if active_page == 'quality' %}active{% endif %}">Data Quality</a>
       </nav>
     </div>
 
@@ -40,6 +46,7 @@
       <kbd>Esc</kbd> close
     </div>
   </header>
+
 
   <!-- Main Content -->
   <main class="main-content">

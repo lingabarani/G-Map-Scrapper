@@ -10,9 +10,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 class ScraperConfig(BaseSettings):
     model_config = ConfigDict(extra="ignore")
 
-    concurrency: int = 5
-    per_host_rate: float = 2.0
-    max_retries: int = 3
+    concurrency: int = 10                  # Raised: parallel HTTP slots
+    category_workers: Union[int, str] = 10 # Raised: all categories concurrent by default
+    all_categories_concurrent: bool = True  # All categories run at the same time per state
+    request_concurrency: int = 10          # Raised: max shared concurrent requests
+    per_host_rate: float = 8.0             # Raised: requests/sec to Google (auto-throttled)
+    max_retries: int = 5                   # Raised: more retries before giving up
     backoff_base: float = 1.5
     tile_base_zoom: int = 15
     tile_max_depth: int = 3
@@ -20,6 +23,8 @@ class ScraperConfig(BaseSettings):
     max_reviews_per_place: int = 100
     download_photos: bool = True
     photo_max_width: int = 800
+    # ---------- Identity rotation (anti-block) ----------
+    rotate_identity_on_block: bool = True  # Auto-rotate UA/cookie/proxy on CAPTCHA/429
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -32,14 +37,24 @@ class ScraperConfig(BaseSettings):
     db_path: Union[str, Path] = "data/gmaps.sqlite"
     raw_data_dir: Union[str, Path] = "data/raw"
     photos_dir: Union[str, Path] = "data/photos"
+    databases_dir: Union[str, Path] = "data/databases"
     exports_dir: Union[str, Path] = "data/exports"
     logs_dir: Union[str, Path] = "logs"
     web_port: int = 8765
     web_host: str = "127.0.0.1"
+    # ---------- Live Raw Export Policy ----------
+    export_every_n_records: int = 500
+    export_interval_seconds: float = 30.0
+    live_raw_export_dir: Optional[str] = None
 
     @property
     def absolute_db_path(self) -> Path:
         p = Path(self.db_path)
+        return p if p.is_absolute() else PROJECT_ROOT / p
+
+    @property
+    def absolute_databases_dir(self) -> Path:
+        p = Path(self.databases_dir)
         return p if p.is_absolute() else PROJECT_ROOT / p
 
     @property

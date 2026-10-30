@@ -50,8 +50,16 @@
         <label class="picker-item"><input type="checkbox" data-col="rating" checked onchange="onColChange(this)"> Rating</label>
         <label class="picker-item"><input type="checkbox" data-col="review_count" checked onchange="onColChange(this)"> Review Count</label>
         <label class="picker-item"><input type="checkbox" data-col="status" checked onchange="onColChange(this)"> Status</label>
+
+        <div class="picker-group-title">Enrichment &amp; Pipeline</div>
+        <label class="picker-item"><input type="checkbox" data-col="website_status" checked onchange="onColChange(this)"> Website Status</label>
+        <label class="picker-item"><input type="checkbox" data-col="enrichment_status" checked onchange="onColChange(this)"> Enrichment Status</label>
+        <label class="picker-item"><input type="checkbox" data-col="contacts_count" checked onchange="onColChange(this)"> Contacts Count</label>
+        <label class="picker-item"><input type="checkbox" data-col="leaders_count" checked onchange="onColChange(this)"> Leaders Count</label>
+        <label class="picker-item"><input type="checkbox" data-col="enrichment_last_checked" onchange="onColChange(this)"> Last Enriched</label>
       </div>
     </div>
+
 
     <!-- Export Controls -->
     <div style="display:flex;align-items:center;gap:6px;margin-left:8px;border-left:1px solid var(--border-subtle);padding-left:12px;">
@@ -207,8 +215,39 @@
       </div>
     </div>
 
+    <!-- Website & Enrichment Filters -->
+    <div class="rail-section">
+      <div class="rail-section-header">Website &amp; Enrichment</div>
+      <select id="railWebsiteStatus" class="rail-search-input" onchange="applyFilters()">
+        <option value="">Website Status: All</option>
+        <option value="verified" {% if filters.website_status == 'verified' %}selected{% endif %}>Verified Official</option>
+        <option value="candidate" {% if filters.website_status == 'candidate' %}selected{% endif %}>Candidate Found</option>
+        <option value="needs_review" {% if filters.website_status == 'needs_review' %}selected{% endif %}>Needs Review</option>
+        <option value="website_missing" {% if filters.website_status == 'website_missing' %}selected{% endif %}>Website Missing</option>
+        <option value="failed" {% if filters.website_status == 'failed' %}selected{% endif %}>Failed / Inaccessible</option>
+      </select>
+      <select id="railEnrichmentStatus" class="rail-search-input" onchange="applyFilters()">
+        <option value="">Enrichment: All</option>
+        <option value="completed" {% if filters.enrichment_status == 'completed' %}selected{% endif %}>Completed</option>
+        <option value="partial" {% if filters.enrichment_status == 'partial' %}selected{% endif %}>Partial</option>
+        <option value="pending" {% if filters.enrichment_status == 'pending' %}selected{% endif %}>Pending</option>
+        <option value="no_data" {% if filters.enrichment_status == 'no_data' %}selected{% endif %}>No Data</option>
+        <option value="failed" {% if filters.enrichment_status == 'failed' %}selected{% endif %}>Failed</option>
+      </select>
+      <select id="railMissingInfo" class="rail-search-input" onchange="applyFilters()">
+        <option value="">Missing Info: None</option>
+        <option value="missing_website" {% if filters.missing_info == 'missing_website' %}selected{% endif %}>Missing Website</option>
+        <option value="missing_phone" {% if filters.missing_info == 'missing_phone' %}selected{% endif %}>Missing Phone</option>
+        <option value="missing_address" {% if filters.missing_info == 'missing_address' %}selected{% endif %}>Missing Address</option>
+        <option value="missing_profile" {% if filters.missing_info == 'missing_profile' %}selected{% endif %}>Missing Company Profile</option>
+        <option value="missing_leaders" {% if filters.missing_info == 'missing_leaders' %}selected{% endif %}>Missing Leadership</option>
+        <option value="missing_contacts" {% if filters.missing_info == 'missing_contacts' %}selected{% endif %}>Missing Contacts</option>
+      </select>
+    </div>
+
     <!-- Rating & Status dropdowns -->
     <div class="rail-section">
+
       <div class="rail-section-header">Min Rating &amp; Sort</div>
       <select id="railMinRating" class="rail-search-input" onchange="applyFilters()">
         <option value="">Min Rating: Any</option>
@@ -261,6 +300,11 @@
               <th data-col="place_id">Place ID</th>
               <th data-col="ftid">FTID</th>
               <th data-col="status">Status</th>
+              <th data-col="website_status">Website Status</th>
+              <th data-col="enrichment_status">Enrichment</th>
+              <th data-col="contacts_count">Contacts</th>
+              <th data-col="leaders_count">Leaders</th>
+              <th data-col="enrichment_last_checked">Last Enriched</th>
               <th style="text-align:right;">Action</th>
             </tr>
           </thead>
@@ -363,6 +407,53 @@
                     <span class="badge badge-status-{{ p.status }}">{{ p.status }}</span>
                   </td>
 
+                  <!-- Website Status -->
+                  <td data-col="website_status">
+                    {% if p.website_status == 'verified' %}
+                      <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">Verified</span>
+                    {% elif p.website_status == 'candidate' %}
+                      <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);">Candidate</span>
+                    {% elif p.website_status == 'needs_review' %}
+                      <span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Review</span>
+                    {% elif p.website_status == 'website_missing' %}
+                      <span class="badge" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">Missing</span>
+                    {% elif p.website_status == 'failed' %}
+                      <span class="badge badge-status-failed">Failed</span>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Enrichment Status -->
+                  <td data-col="enrichment_status">
+                    {% if p.enrichment_status == 'completed' %}
+                      <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">Completed</span>
+                    {% elif p.enrichment_status == 'partial' %}
+                      <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);">Partial</span>
+                    {% elif p.enrichment_status == 'pending' %}
+                      <span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Pending</span>
+                    {% elif p.enrichment_status == 'failed' %}
+                      <span class="badge badge-status-failed">Failed</span>
+                    {% else %}
+                      <span class="empty-dash">—</span>
+                    {% endif %}
+                  </td>
+
+                  <!-- Contacts Count -->
+                  <td class="mono-col" data-col="contacts_count">
+                    {{ p.contacts_count or 0 }}
+                  </td>
+
+                  <!-- Leaders Count -->
+                  <td class="mono-col" data-col="leaders_count">
+                    {{ p.leaders_count or 0 }}
+                  </td>
+
+                  <!-- Last Enriched -->
+                  <td class="mono-col" data-col="enrichment_last_checked" style="font-size:11px;color:var(--text-muted);">
+                    {{ p.enrichment_last_checked[:19] if p.enrichment_last_checked else '—' }}
+                  </td>
+
                   <!-- Action -->
                   <td style="text-align:right;">
                     <a href="/places/{{ p.cid }}" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();">Full &rarr;</a>
@@ -371,7 +462,8 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="19">
+                <td colspan="25">
+
                   <div class="state-box">
                     <div class="state-icon">🔍</div>
                     <div class="state-title">No Places Found</div>
@@ -660,6 +752,16 @@
     const sortVal = document.getElementById("railSort").value;
     if (sortVal && sortVal !== "rating_desc") newParams.set("sort", sortVal);
 
+    // Enrichment & Pipeline filters
+    const webStatus = document.getElementById("railWebsiteStatus")?.value;
+    if (webStatus) newParams.set("website_status", webStatus);
+
+    const enrichStatus = document.getElementById("railEnrichmentStatus")?.value;
+    if (enrichStatus) newParams.set("enrichment_status", enrichStatus);
+
+    const missingInfo = document.getElementById("railMissingInfo")?.value;
+    if (missingInfo) newParams.set("missing_info", missingInfo);
+
     newParams.set("page", "1");
     window.location.search = newParams.toString();
   }
@@ -715,6 +817,11 @@
       chips.push({ label: `City: ${ci}`, key: "city", val: ci });
     });
 
+    // Pipeline & Enrichment Chips
+    if (searchParams.get("website_status")) chips.push({ label: `Website: ${searchParams.get("website_status")}`, key: "website_status" });
+    if (searchParams.get("enrichment_status")) chips.push({ label: `Enrichment: ${searchParams.get("enrichment_status")}`, key: "enrichment_status" });
+    if (searchParams.get("missing_info")) chips.push({ label: `Missing: ${searchParams.get("missing_info").replace('missing_', '')}`, key: "missing_info" });
+
     // Booleans
     if (searchParams.get("has_reviews") === "true") chips.push({ label: "Has Reviews", key: "has_reviews" });
     if (searchParams.get("has_hours") === "true") chips.push({ label: "Has Hours", key: "has_hours" });
@@ -724,6 +831,7 @@
     if (searchParams.get("has_photos") === "true") chips.push({ label: "Has Photos", key: "has_photos" });
     if (searchParams.get("claimed") === "true") chips.push({ label: "Verified Only", key: "claimed" });
     if (searchParams.get("min_rating")) chips.push({ label: `Min ★: ${searchParams.get("min_rating")}`, key: "min_rating" });
+
 
     if (chips.length === 0) {
       bar.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted);">No active filters (showing all places)</span>';

@@ -1,114 +1,173 @@
 {% extends "base.html" %}
 
-{% block title %}Data Quality Audit — GMap Scraper{% endblock %}
+{% block title %}Data Quality & Integrity — Business Intelligence Pipeline | GMaps Scraper{% endblock %}
 
 {% block content %}
 <div class="view-header">
   <div>
     <h1 class="view-title">Data Quality &amp; Integrity Audit</h1>
-    <div class="view-subtitle">Automated inspection for null values, duplicates, coordinate anomalies and failed scraping rows</div>
+    <div class="view-subtitle">Accurate SQLite metrics for field completeness, verification coverage, extraction success, and manual review items</div>
   </div>
+
   <div>
     <button class="btn btn-secondary btn-sm" onclick="retryFailed()">↺ Retry Failed Rows ({{ quality.failed_rows | length }})</button>
   </div>
 </div>
 
-<!-- Per-Column Null Counts -->
-<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
-  <h3 class="drawer-section-title">Field Completeness &amp; Null Counts</h3>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;">
-    {% for col, null_cnt in quality.null_counts.items() %}
-      <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
-        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">{{ col }}</div>
-        <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;margin:4px 0;">{{ null_cnt }}</div>
-        <div style="font-size:10.5px;color:var(--text-secondary);">
-          {% if quality.total > 0 %}
-            {{ ((quality.total - null_cnt) / quality.total * 100) | round(1) }}% populated
-          {% else %}
-            0% populated
-          {% endif %}
-        </div>
+<!-- Planned Roadmap Step 4 Notice -->
+<div class="notice-box" style="margin-bottom:20px;">
+  ℹ️ <strong>Planned Roadmap Notice:</strong> Email deliverability pinging, mailbox existence verification, and phone line validation are part of <strong>Step 4 — Contact Validation &amp; Reconciliation</strong>. Metrics below accurately represent the completeness of collected and extracted information in SQLite, labeled separately from future validity checks.
+</div>
+
+<!-- 1. Field Completeness Scorecard -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
+  <div style="margin-bottom:12px;">
+    <h3 class="drawer-section-title" style="margin:0;border:none;">Field Completeness &amp; Null Counts</h3>
+    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Percentage of total business records containing populated values vs null counts</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;">
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Business Name</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-cyan);margin:4px 0;">
+        {{ quality.metrics.name_completeness if quality.metrics else 0 }}%
       </div>
-    {% endfor %}
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_name if quality.counts else 0 }} of {{ quality.total }} records
+      </div>
+    </div>
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Street Address</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-cyan);margin:4px 0;">
+        {{ quality.metrics.address_completeness if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_address if quality.counts else 0 }} of {{ quality.total }} records
+      </div>
+    </div>
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Telephone Number</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-cyan);margin:4px 0;">
+        {{ quality.metrics.phone_completeness if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_phone if quality.counts else 0 }} of {{ quality.total }} records
+      </div>
+    </div>
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Website URL</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-cyan);margin:4px 0;">
+        {{ quality.metrics.website_completeness if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_website if quality.counts else 0 }} of {{ quality.total }} records
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- Duplicate Detection -->
-<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
-  <h3 class="drawer-section-title">Duplicate Detection (Name + Address Collisions)</h3>
-  {% if quality.duplicates_by_name_address %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Place Name</th>
-          <th>Address</th>
-          <th>Collisions</th>
-          <th>Associated CIDs</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for dup in quality.duplicates_by_name_address %}
-          <tr>
-            <td class="name-col">{{ dup.name }}</td>
-            <td class="address-col">{{ dup.address }}</td>
-            <td class="mono-col"><span class="badge" style="background:var(--accent-amber-glow);color:var(--accent-amber);">{{ dup.count }} copies</span></td>
-            <td class="mono-col">{{ dup.cids | join(', ') }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <div class="state-box" style="padding:24px;">
-      <div class="state-icon" style="color:var(--accent-green);">✓</div>
-      <div class="state-title" style="color:var(--text-primary);">Zero Duplicate Places Detected</div>
-      <div style="font-size:12px;">Global CID deduplication collapsed all overlapping tiles successfully.</div>
+<!-- 2. Extraction & Verification Coverage Scorecard -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
+  <div style="margin-bottom:12px;">
+    <h3 class="drawer-section-title" style="margin:0;border:none;">Pipeline Extraction &amp; Verification Coverage</h3>
+    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Proportion of records successfully enriched through Stage 2 and Stage 3</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;">
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Official Website Verified</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-green);margin:4px 0;">
+        {{ quality.metrics.website_verification_coverage if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.verified_websites if quality.counts else 0 }} verified official
+      </div>
     </div>
-  {% endif %}
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Company Profile Coverage</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent-purple);margin:4px 0;">
+        {{ quality.metrics.company_profile_coverage if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.company_profiles if quality.counts else 0 }} company profiles
+      </div>
+    </div>
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Leadership Coverage</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:#38bdf8;margin:4px 0;">
+        {{ quality.metrics.leadership_extraction_coverage if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_leaders if quality.counts else 0 }} companies with leaders
+      </div>
+    </div>
+
+    <div style="background:var(--bg-surface);padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Public Contacts Coverage</div>
+      <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:#06b6d4;margin:4px 0;">
+        {{ quality.metrics.contact_extraction_coverage if quality.metrics else 0 }}%
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        {{ quality.counts.with_contacts if quality.counts else 0 }} companies with contacts
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- Coordinate Outliers -->
-<div class="table-card" style="padding:16px 20px;margin-bottom:18px;">
-  <h3 class="drawer-section-title">Coordinate Outliers (Invalid Latitude / Longitude)</h3>
-  {% if quality.coordinate_outliers %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>CID</th>
-          <th>Name</th>
-          <th>Latitude</th>
-          <th>Longitude</th>
-          <th>Issue</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for out in quality.coordinate_outliers %}
-          <tr>
-            <td class="mono-col">{{ out.cid }}</td>
-            <td class="name-col">{{ out.name }}</td>
-            <td class="mono-col">{{ out.latitude }}</td>
-            <td class="mono-col">{{ out.longitude }}</td>
-            <td><span class="badge badge-status-failed">Out of Range / Zero</span></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <div class="state-box" style="padding:24px;">
-      <div class="state-icon" style="color:var(--accent-green);">✓</div>
-      <div class="state-title" style="color:var(--text-primary);">All Coordinates Valid</div>
-      <div style="font-size:12px;">All geocoded places have valid non-zero latitude/longitude coordinates within bounds.</div>
-    </div>
-  {% endif %}
-</div>
-
-<!-- Failed Rows & Error Breakdown -->
-<div class="table-card" style="padding:16px 20px;">
+<!-- 3. Needs Review Records -->
+{% if quality.needs_review_rows %}
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <h3 class="drawer-section-title" style="margin:0;border:none;">Failed Scraping Rows</h3>
+    <div>
+      <h3 class="drawer-section-title" style="margin:0;border:none;">Websites Needing Human Review ({{ quality.needs_review_rows | length }})</h3>
+      <div style="font-size:11.5px;color:var(--text-muted);">Discovered candidate domains requiring verification due to partial name or territory discrepancy</div>
+    </div>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>CID</th>
+        <th>Business Name</th>
+        <th>Candidate URL</th>
+        <th>Recorded Website</th>
+        <th>Updated At</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in quality.needs_review_rows %}
+      <tr>
+        <td class="mono-col">{{ r.cid }}</td>
+        <td class="name-col">{{ r.name }}</td>
+        <td class="mono-col" style="color:var(--accent-amber);">{{ r.website_candidate or '—' }}</td>
+        <td class="mono-col">{{ r.website or '—' }}</td>
+        <td class="mono-col" style="color:var(--text-muted);">{{ r.updated_at[:16] if r.updated_at else '—' }}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="Drawer.open('{{ r.cid }}')">Inspect</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- 4. Failed Records Breakdown -->
+<div class="table-card" style="padding:16px 20px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div>
+      <h3 class="drawer-section-title" style="margin:0;border:none;">Failed Scraping &amp; Enrichment Records ({{ quality.failed_rows | length }})</h3>
+      <div style="font-size:11.5px;color:var(--text-muted);">Errors logged during place details, official website discovery, or crawling</div>
+    </div>
     {% if quality.failed_rows %}
       <button class="btn btn-primary btn-sm" onclick="retryFailed()">Retry All Failed</button>
     {% endif %}
   </div>
+
   {% if quality.failed_rows %}
     <table class="data-table">
       <thead>
@@ -116,7 +175,7 @@
           <th>CID</th>
           <th>Name</th>
           <th>Attempts</th>
-          <th>Error Message</th>
+          <th>Error Reason</th>
           <th>Last Attempt</th>
           <th>Action</th>
         </tr>
@@ -128,7 +187,7 @@
             <td class="name-col">{{ f.name }}</td>
             <td class="mono-col">{{ f.attempts }}</td>
             <td style="color:var(--accent-rose);font-family:var(--font-mono);font-size:11px;">{{ f.error }}</td>
-            <td class="mono-col">{{ f.updated_at }}</td>
+            <td class="mono-col">{{ f.updated_at[:16] if f.updated_at else '—' }}</td>
             <td>
               <button class="btn btn-secondary btn-sm" onclick="Drawer.open('{{ f.cid }}')">Inspect</button>
             </td>
@@ -139,22 +198,92 @@
   {% else %}
     <div class="state-box" style="padding:24px;">
       <div class="state-icon" style="color:var(--accent-green);">✓</div>
-      <div class="state-title" style="color:var(--text-primary);">Zero Failed Rows</div>
-      <div style="font-size:12px;">Every attempted place record enriched and fetched with 100% success.</div>
+      <div class="state-title" style="color:var(--text-primary);">Zero Failed Records</div>
+      <div style="font-size:12px;">All processed pipeline records completed successfully with zero unhandled errors.</div>
     </div>
   {% endif %}
+</div>
+
+<!-- 5. Duplicate Detection & Coordinate Outliers -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:16px;">
+  <!-- Duplicate Detection -->
+  <div class="table-card" style="padding:16px 20px;">
+    <h3 class="drawer-section-title">Duplicate Collisions (Name + Address)</h3>
+    {% if quality.duplicates_by_name_address %}
+      <table class="data-table" style="font-size:11.5px;">
+        <thead>
+          <tr>
+            <th>Place Name</th>
+            <th>Collisions</th>
+            <th>CIDs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for dup in quality.duplicates_by_name_address[:10] %}
+            <tr>
+              <td class="name-col">{{ dup.name }}</td>
+              <td class="mono-col"><span class="badge" style="background:var(--accent-amber-glow);color:var(--accent-amber);">{{ dup.count }}</span></td>
+              <td class="mono-col" style="font-size:10px;">{{ dup.cids | join(', ') }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="state-box" style="padding:20px;">
+        <div class="state-icon" style="color:var(--accent-green);">✓</div>
+        <div class="state-title">Zero Duplicates Detected</div>
+        <div style="font-size:11.5px;">CID deduplication prevented duplicate database rows.</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Coordinate Outliers -->
+  <div class="table-card" style="padding:16px 20px;">
+    <h3 class="drawer-section-title">Coordinate Outliers (Invalid Lat / Long)</h3>
+    {% if quality.coordinate_outliers %}
+      <table class="data-table" style="font-size:11.5px;">
+        <thead>
+          <tr>
+            <th>CID</th>
+            <th>Name</th>
+            <th>Coords</th>
+            <th>Issue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for out in quality.coordinate_outliers[:10] %}
+            <tr>
+              <td class="mono-col">{{ out.cid }}</td>
+              <td class="name-col">{{ out.name }}</td>
+              <td class="mono-col">{{ out.latitude }}, {{ out.longitude }}</td>
+              <td><span class="badge badge-status-failed">Out of Range</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="state-box" style="padding:20px;">
+        <div class="state-icon" style="color:var(--accent-green);">✓</div>
+        <div class="state-title">All Coordinates Valid</div>
+        <div style="font-size:11.5px;">All geocoded places have valid geographic latitude/longitude values.</div>
+      </div>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  function retryFailed() {
-    fetch("/api/retry-failed", { method: "POST" })
-      .then(res => res.json())
-      .then(data => {
-        alert(`Reset ${data.reset_count} places to pending status. Check 'Runs' to re-execute.`);
-        window.location.reload();
-      });
+async function retryFailed() {
+  if (!confirm("Reset all failed business records to pending status for retry?")) return;
+  try {
+    const res = await fetch("/api/retry-failed", { method: "POST" });
+    const data = await res.json();
+    alert(`Success: Reset ${data.reset_count || 0} failed places to pending.`);
+    location.reload();
+  } catch (err) {
+    alert(`Retry failed: ${err.message}`);
   }
+}
 </script>
 {% endblock %}

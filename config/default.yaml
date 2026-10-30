@@ -1,23 +1,49 @@
-concurrency: 5
-per_host_rate: 2.0
-max_retries: 3
-backoff_base: 1.5
+# ============================================================
+# Google Maps Scraper - Configuration
+# ============================================================
+
+# --- Speed & Concurrency ---
+concurrency: 10                  # Parallel HTTP connection slots
+category_workers: 10             # Categories processed in parallel per state
+all_categories_concurrent: true  # Run ALL categories at the same time per state
+request_concurrency: 10          # Shared concurrent HTTP request limit
+per_host_rate: 8.0               # Requests/sec to Google (client auto-throttles)
+
+# --- Retry & Anti-Block ---
+max_retries: 5                   # Retry attempts per tile before marking failed
+backoff_base: 1.5                # Exponential backoff multiplier
+rotate_identity_on_block: true   # Auto-rotate UA/cookie/proxy when Google blocks
+
+# --- Tile Depth ---
 tile_base_zoom: 15
 tile_max_depth: 3
 tile_overlap_pct: 10
+
+# --- Reviews & Photos ---
 max_reviews_per_place: 100
 download_photos: true
 photo_max_width: 800
+
+# --- Browser Identity (rotated automatically on block) ---
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 accept_language: "en-US,en;q=0.9"
 hl: "en"
 gl: "us"
+
+# --- Proxy Pool (optional but strongly recommended for speed) ---
+# Add proxy URLs here: "http://user:pass@host:port" or "socks5://host:port"
+# The client will round-robin across them and advance on each block detection.
 proxies: []
+
 headless_fallback: false
+
+# --- Paths ---
 db_path: "data/gmaps.sqlite"
 raw_data_dir: "data/raw"
 photos_dir: "data/photos"
 exports_dir: "data/exports"
 logs_dir: "logs"
+
+# --- Web Dashboard ---
 web_port: 8765
 web_host: "127.0.0.1"

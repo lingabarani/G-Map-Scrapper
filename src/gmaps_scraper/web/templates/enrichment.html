@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Website Enrichment — Business Intelligence Pipeline | GMaps Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header">
+  <div>
+    <h1 class="view-title">Website Discovery &amp; Company Enrichment</h1>
+    <div class="view-subtitle">Official domain verification, extracted corporate profiles, executive leadership, and
+      business contacts</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button class="btn btn-secondary btn-sm" onclick="triggerDiscoveryQuick()">Run Discovery &rarr;</button>
+    <button class="btn btn-secondary btn-sm" onclick="triggerEnrichmentQuick()">Run Enrichment &rarr;</button>
+    <a href="/pipeline" class="btn btn-primary btn-sm">Pipeline Control</a>
+  </div>
+</div>
+
+<!-- Tabbed Category Navigation -->
+<div
+  style="display:flex;gap:6px;margin-bottom:16px;overflow-x:auto;padding-bottom:6px;border-bottom:1px solid var(--border-subtle);">
+  <button class="btn btn-sm btn-secondary active-subtab" data-tab="all" onclick="selectTab('all', this)">
+    All Records ({{ stats.total_places }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="verified" onclick="selectTab('verified', this)">
+    Verified Websites ({{ stats.verified_websites_count }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="candidates" onclick="selectTab('candidates', this)">
+    Candidates ({{ stats.website_status_breakdown.candidate or 0 }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="needs_review" onclick="selectTab('needs_review', this)">
+    Needs Review ({{ stats.needs_review_count }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="missing" onclick="selectTab('missing', this)">
+    Missing Websites ({{ stats.website_missing_count }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="failed" onclick="selectTab('failed', this)">
+    Failed / Inaccessible ({{ stats.website_failed_count }})
+  </button>
+  <button class="btn btn-sm btn-secondary" data-tab="enriched" onclick="selectTab('enriched', this)">
+    Completed Profiles ({{ stats.enrichment_completed_count }})
+  </button>
+</div>
+
+<!-- Filters Bar -->
+<div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
+  <input type="text" id="enrichmentSearch" placeholder="Search business name, website, or CID..."
+    class="rail-search-input" style="width:280px;margin:0;" onkeydown="if(event.key==='Enter') loadItems()">
+  <select id="enrichmentCountry" class="rail-search-input" style="width:140px;margin:0;" onchange="loadItems()">
+    <option value="">All Countries</option>
+    <option value="US">USA (US)</option>
+    <option value="MX">Mexico (MX)</option>
+  </select>
+  <button class="btn btn-primary btn-sm" onclick="loadItems()">Filter</button>
+  <span id="enrichmentStatusText" style="font-size:12px;color:var(--text-muted);margin-left:auto;">Loading...</span>
+</div>
+
+<!-- Data Table Card -->
+<div class="table-card">
+  <div class="table-wrap full-data-mode">
+    <table class="data-table" id="enrichmentTable">
+      <thead>
+        <tr>
+          <th>Business Name</th>
+          <th>Territory</th>
+          <th>Website URL</th>
+          <th>Candidate URL</th>
+          <th>Verification Status</th>
+          <th>Enrichment Status</th>
+          <th>Leaders</th>
+          <th>Contacts</th>
+          <th>Last Checked</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="enrichmentTableBody">
+        <tr>
+          <td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">
+            Loading enrichment items...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination Footer -->
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:0 4px;">
+  <span id="paginationInfo" style="font-size:12px;color:var(--text-muted);">Showing 0 items</span>
+  <div style="display:flex;gap:6px;">
+    <button id="prevPageBtn" class="btn btn-secondary btn-sm" onclick="changePage(-1)" disabled>&larr; Previous</button>
+    <button id="nextPageBtn" class="btn btn-secondary btn-sm" onclick="changePage(1)" disabled>Next &rarr;</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentTab = 'all';
+  let currentPage = 1;
+  const pageSize = 30;
+
+  function selectTab(tab, el) {
+    currentTab = tab;
+    currentPage = 1;
+    document.querySelectorAll("[data-tab]").forEach(b => b.classList.remove("active-subtab", "btn-primary"));
+    if (el) el.classList.add("active-subtab");
+    loadItems();
+  }
+
+  async function loadItems() {
+    const tbody = document.getElementById("enrichmentTableBody");
+    const statusText = document.getElementById("enrichmentStatusText");
+    const search = document.getElementById("enrichmentSearch").value.trim();
+    const country = document.getElementById("enrichmentCountry").value;
+
+    statusText.innerText = "Fetching records...";
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">Loading...</td></tr>';
+
+    const params = new URLSearchParams({
+      tab: currentTab,
+      page: currentPage,
+      page_size: pageSize
+    });
+    if (search) params.set("q", search);
+    if (country) params.set("country", country);
+
+    try {
+      const res = await fetch(`/api/enrichment/items?${params.toString()}`);
+      const data = await res.json();
+      const items = data.items || [];
+      const total = data.total || 0;
+
+      statusText.innerText = `${total} matching business records`;
+      document.getElementById("paginationInfo").innerText = `Page ${currentPage} of ${Math.ceil(total / pageSize) || 1} (${total} total)`;
+      document.getElementById("prevPageBtn").disabled = currentPage <= 1;
+      document.getElementById("nextPageBtn").disabled = currentPage * pageSize >= total;
+
+      if (items.length === 0) {
+        tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">
+            No business records found in this category.
+          </td>
+        </tr>
+      `;
+        return;
+      }
+
+      tbody.innerHTML = items.map(p => {
+        const ws = p.website_status || 'unverified';
+        let wsBadge = '';
+        if (ws === 'verified') wsBadge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">Verified Official</span>';
+        else if (ws === 'candidate') wsBadge = '<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);">Candidate</span>';
+        else if (ws === 'needs_review') wsBadge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Review Needed</span>';
+        else if (ws === 'website_missing') wsBadge = '<span class="badge" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">Missing</span>';
+        else if (ws === 'failed') wsBadge = '<span class="badge badge-status-failed">Failed</span>';
+        else wsBadge = '<span class="badge">Unverified</span>';
+
+        const es = p.enrichment_status || 'pending';
+        let esBadge = '';
+        if (es === 'completed') esBadge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;">Completed</span>';
+        else if (es === 'partial') esBadge = '<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;">Partial</span>';
+        else if (es === 'pending') esBadge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">Pending</span>';
+        else if (es === 'failed') esBadge = '<span class="badge badge-status-failed">Failed</span>';
+        else esBadge = `<span class="badge">${escapeHtml(es)}</span>`;
+
+        const webUrl = p.official_website_url || p.website;
+
+        return `
+        <tr data-cid="${p.cid}" onclick="Drawer.open('${p.cid}')" style="cursor:pointer;">
+          <td style="font-weight:600;color:var(--text-primary);">${escapeHtml(p.name)}</td>
+          <td>${escapeHtml(p.region || '')} (${escapeHtml(p.country_code || p.country || 'USA')})</td>
+          <td>
+            ${webUrl ? `<a href="${escapeHtml(webUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--accent-cyan);text-decoration:none;">${escapeHtml(webUrl)} ↗</a>` : '<span class="empty-dash">—</span>'}
+          </td>
+          <td>
+            ${p.website_candidate ? `<span class="mono-col" style="font-size:11px;">${escapeHtml(p.website_candidate)}</span>` : '<span class="empty-dash">—</span>'}
+          </td>
+          <td>${wsBadge}</td>
+          <td>${esBadge}</td>
+          <td class="mono-col">${p.leaders_count || 0}</td>
+          <td class="mono-col">${p.contacts_count || 0}</td>
+          <td class="mono-col" style="font-size:11px;color:var(--text-muted);">${p.enrichment_last_checked ? p.enrichment_last_checked.substring(0, 16) : '—'}</td>
+          <td style="text-align:right;">
+            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); Drawer.open('${p.cid}')">Details &rarr;</button>
+          </td>
+        </tr>
+      `;
+      }).join("");
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--accent-rose);">Failed to load records: ${escapeHtml(e.message)}</td></tr>`;
+    }
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    loadItems();
+  }
+
+  async function triggerDiscoveryQuick() {
+    if (!confirm("Run Stage 2 Official Website Discovery on 25 eligible business records?")) return;
+    const country = document.getElementById("enrichmentCountry").value || "US";
+    try {
+      const res = await fetch("/api/pipeline/run-discovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country_code: country, limit: 25 })
+      });
+      const d = await res.json();
+      alert(`Website discovery finished! Processed: ${d.total_processed || 0}`);
+      loadItems();
+    } catch (err) {
+      alert(`Discovery error: ${err.message}`);
+    }
+  }
+
+  async function triggerEnrichmentQuick() {
+    if (!confirm("Run Stage 3 Company Information Extraction on 25 verified official websites?")) return;
+    const country = document.getElementById("enrichmentCountry").value || "US";
+    try {
+      const res = await fetch("/api/pipeline/run-enrichment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country_code: country, limit: 25, max_pages: 5 })
+      });
+      const d = await res.json();
+      alert(`Enrichment finished! Processed: ${d.total_processed || 0}, Leaders extracted: ${d.total_leaders_extracted || 0}, Contacts: ${d.total_contacts_extracted || 0}`);
+      loadItems();
+    } catch (err) {
+      alert(`Enrichment error: ${err.message}`);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    loadItems();
+  });
+</script>
+<style>
+  .active-subtab {
+    background: var(--accent-cyan-glow) !important;
+    color: var(--accent-cyan) !important;
+    border-color: var(--accent-cyan) !important;
+  }
+</style>
+{% endblock %}

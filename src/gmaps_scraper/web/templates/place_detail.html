@@ -76,7 +76,85 @@
       </div>
     </div>
 
+    <!-- Official Website & Company Enrichment -->
+    <div class="table-card record-card">
+      <div class="card-section-header">
+        <span class="section-badge" style="background:rgba(16,185,129,0.2);color:#10b981;border-color:#10b981;">WEB</span>
+        <h3>Official Website &amp; Company Enrichment</h3>
+      </div>
+      <div class="record-field-list">
+        <div class="field-row">
+          <div class="field-label">Website Status</div>
+          <div class="field-val">
+            <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;">{{ place.website_status or 'unverified' }}</span>
+          </div>
+        </div>
+        <div class="field-row {% if not place.official_website_url and not place.website %}empty-field{% endif %}">
+          <div class="field-label">Official Website URL</div>
+          <div class="field-val">
+            {% if place.official_website_url or place.website %}
+              <a href="{{ place.official_website_url or place.website }}" target="_blank" rel="noopener" style="color:var(--accent-cyan);font-weight:600;">
+                {{ place.official_website_url or place.website }} ↗
+              </a>
+            {% else %}
+              <span class="empty-dash">—</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row {% if not place.website_candidate %}empty-field{% endif %}">
+          <div class="field-label">Discovery Candidate</div>
+          <div class="field-val mono-col">{{ place.website_candidate or '—' }}</div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Enrichment Status</div>
+          <div class="field-val">
+            <span class="badge badge-status-{{ place.enrichment_status or 'pending' }}">{{ place.enrichment_status or 'pending' }}</span>
+          </div>
+        </div>
+        <div class="field-row {% if not place.profile %}empty-field{% endif %}">
+          <div class="field-label">Company Overview</div>
+          <div class="field-val" style="font-size:12px;line-height:1.5;">
+            {{ place.profile.overview if place.profile and place.profile.overview else 'Not extracted yet' }}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Leadership Records</div>
+          <div class="field-val">
+            {% if place.leaders and place.leaders | length > 0 %}
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                {% for ldr in place.leaders %}
+                  <div style="background:var(--bg-surface);padding:6px 10px;border-radius:4px;border:1px solid var(--border-subtle);font-size:12px;">
+                    <strong>{{ ldr.full_name }}</strong> &bull; <span style="color:var(--accent-cyan);">{{ ldr.title }}</span>
+                    {% if ldr.role_type %}<span class="badge" style="margin-left:6px;">{{ ldr.role_type }}</span>{% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="empty-dash">No leadership records published</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Business Contacts</div>
+          <div class="field-val">
+            {% if place.contacts and place.contacts | length > 0 %}
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                {% for c in place.contacts %}
+                  <span class="badge" style="background:var(--bg-surface);border:1px solid var(--border-subtle);">
+                    <strong>{{ c.contact_type }}:</strong> {{ c.contact_value }} ({{ c.label or 'general' }})
+                  </span>
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="empty-dash">No business contacts extracted</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 2. Location -->
+
     <div class="table-card record-card">
       <div class="card-section-header">
         <span class="section-badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);border-color:var(--accent-cyan);">LOC</span>

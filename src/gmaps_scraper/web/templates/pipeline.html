@@ -1,0 +1,1798 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline Control — Automated Orchestrator | GMaps Scraper{% endblock %}
+
+{% block content %}
+<div class="view-header" style="margin-bottom:18px;">
+  <div>
+    <h1 class="view-title" style="display:flex;align-items:center;gap:10px;">
+      <span>Pipeline Control &amp; Orchestrator</span>
+      <span id="orchestratorLiveBadge" class="badge" style="font-size:11px;padding:3px 9px;border-radius:var(--radius-full);background:rgba(100,116,139,0.2);color:var(--text-muted);">
+        IDLE
+      </span>
+    </h1>
+    <div class="view-subtitle">
+      Fully automated state-by-state data collection: configure territory &amp; categories once and run all stages with one click.
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <button id="btnPlan" class="btn btn-secondary btn-sm" onclick="previewPlan()">
+      <span>📋</span> Preview Plan
+    </button>
+    <button id="btnRetryFailed" class="btn btn-secondary btn-sm" onclick="retryFailedTasks()" title="Reset failed tasks to pending">
+      <span>🔄</span> Retry Failed (<span id="failedTaskCountBadge">0</span>)
+    </button>
+    <button id="btnPause" class="btn btn-warning btn-sm" style="display:none;" onclick="pausePipeline()">
+      <span>⏸</span> Pause
+    </button>
+    <button id="btnResume" class="btn btn-secondary btn-sm" style="display:none;" onclick="resumePipeline()">
+      <span>▶</span> Resume
+    </button>
+    <button id="btnCancel" class="btn btn-danger btn-sm" style="display:none;" onclick="cancelPipeline()">
+      <span>⏹</span> Cancel
+    </button>
+    <button id="btnStart" class="btn btn-primary btn-sm" onclick="startPipeline()" style="font-weight:700;padding:7px 18px;">
+      <span>🚀</span> Start Pipeline
+    </button>
+  </div>
+</div>
+
+<!-- Real-time Execution Status & Progress Monitor -->
+<div id="activeRunBanner" class="card" style="padding:18px 20px;margin-bottom:20px;background:var(--bg-secondary);border:1px solid var(--border-highlight);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+    <div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);font-weight:700;">
+        Active Orchestration Status
+      </div>
+      <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-top:2px;display:flex;align-items:center;gap:10px;">
+        <span id="activeStageLabel">Stage 1: Business Collection</span>
+        <span id="activeRunIdBadge" style="font-size:12px;color:var(--accent-cyan);font-family:var(--font-mono);font-weight:500;">
+          [No Active Run]
+        </span>
+      </div>
+      <div id="activeTargetDetail" style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+        Target: <strong id="activeTargetText" style="color:var(--text-primary);">-</strong>
+      </div>
+    </div>
+
+    <!-- Stage Progress Indicator Pills -->
+      <div id="pillStage1" class="stage-pill" style="padding:6px 12px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-subtle);font-size:11.5px;display:flex;align-items:center;gap:6px;">
+        <span class="stage-icon">●</span> <span class="badge" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);font-weight:700;">STAGE 1</span> Collection
+      </div>
+      <div id="pillStage2" class="stage-pill" style="padding:6px 12px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-subtle);font-size:11.5px;display:flex;align-items:center;gap:6px;">
+        <span class="stage-icon">●</span> <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-weight:700;">STAGE 2</span> Discovery
+      </div>
+      <div id="pillStage3" class="stage-pill" style="padding:6px 12px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-subtle);font-size:11.5px;display:flex;align-items:center;gap:6px;">
+        <span class="stage-icon">●</span> <span class="badge" style="background:var(--accent-purple-glow);color:var(--accent-purple);font-weight:700;">STAGE 3</span> Enrichment
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress Bar -->
+  <div style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-muted);margin-bottom:4px;">
+      <span>Task Completion Progress</span>
+      <span id="progressPctText" style="font-weight:700;color:var(--accent-cyan);">0%</span>
+    </div>
+    <div style="width:100%;height:8px;background:rgba(255,255,255,0.06);border-radius:var(--radius-full);overflow:hidden;">
+      <div id="orchestratorProgressBar" style="width:0%;height:100%;background:linear-gradient(90deg, var(--accent-cyan), var(--accent-green));transition:width 0.4s ease;"></div>
+    </div>
+  </div>
+
+  <!-- Real Metrics Grid -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;">
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Completed Tasks</div>
+      <div id="metricCompletedTasks" style="font-size:18px;font-weight:700;color:var(--accent-green);">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Pending / In Progress</div>
+      <div id="metricPendingTasks" style="font-size:18px;font-weight:700;color:var(--accent-amber);">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Failed Tasks</div>
+      <div id="metricFailedTasks" style="font-size:18px;font-weight:700;color:var(--accent-rose);">0</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Businesses Collected</div>
+      <div id="metricBusinesses" style="font-size:18px;font-weight:700;color:var(--accent-cyan);">{{ stats.total_places }}</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Verified Websites</div>
+      <div id="metricVerifiedWebsites" style="font-size:18px;font-weight:700;color:#10b981;">{{ stats.verified_websites_count }}</div>
+    </div>
+    <div style="background:var(--bg-surface);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+      <div style="font-size:11px;color:var(--text-muted);">Companies Enriched</div>
+      <div id="metricEnrichedCompanies" style="font-size:18px;font-weight:700;color:var(--accent-purple);">{{ stats.enrichment_completed_count }}</div>
+    </div>
+  </div>
+
+  <!-- Recent Error Alert Banner (Hidden when no errors) -->
+  <div id="recentErrorBox" style="display:none;margin-top:14px;padding:10px 14px;background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);border-radius:var(--radius-md);font-size:12px;color:var(--text-primary);">
+    <strong style="color:var(--accent-rose);">Recent Error:</strong>
+    <span id="recentErrorText"></span>
+  </div>
+</div>
+
+<!-- Live Real-Time Scraping Feed & Category Monitor -->
+<div class="card" style="padding:18px 20px;margin-bottom:24px;background:#0b1120;border:1px solid #1e293b;border-radius:var(--radius-lg);box-shadow:var(--shadow-md);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;" id="liveStreamDot"></span>
+      <h3 style="margin:0;font-size:15px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">
+        <span>⚡ Real-Time Scraping Stream</span>
+        <span id="liveStreamBadge" class="badge" style="font-size:10px;padding:2px 8px;border-radius:12px;background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-weight:600;">
+          LIVE STREAM ACTIVE
+        </span>
+      </h3>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;font-size:12px;">
+      <span style="color:#94a3b8;">Session Discoveries: <strong id="liveSessionNewCount" style="color:#10b981;font-size:14px;">+0</strong></span>
+      <span style="color:#475569;">|</span>
+      <label style="display:flex;align-items:center;gap:5px;color:#94a3b8;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="liveFeedAutoScroll" checked style="accent-color:#10b981;"> Auto-scroll
+      </label>
+      <button class="btn btn-secondary btn-sm" onclick="clearLiveFeed()" style="padding:2px 8px;font-size:11px;">
+        Clear Feed
+      </button>
+    </div>
+  </div>
+
+  <!-- Live Category Status Chips Bar -->
+  <div style="margin-bottom:12px;">
+    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;font-weight:600;">
+      Concurrent Category Live Tallies
+    </div>
+    <div id="liveCategoryChipsContainer" style="display:flex;flex-wrap:wrap;gap:6px;">
+      <!-- Populated dynamically via JS -->
+      {% for cat in categories %}
+      <div id="catLiveChip_{{ cat.key }}" style="display:flex;align-items:center;gap:6px;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:4px 10px;font-size:11.5px;color:#cbd5e1;transition:all 0.3s ease;">
+        <span style="font-weight:600;">{{ cat.label }}</span>
+        <span id="catLiveBadge_{{ cat.key }}" style="font-weight:700;color:#64748b;background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:4px;font-family:var(--font-mono);font-size:11px;">+0</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Live Event Stream Terminal Box -->
+  <div id="liveScrapingFeed" style="max-height:220px;min-height:110px;overflow-y:auto;background:#050811;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 14px;font-family:var(--font-mono);font-size:12px;color:#cbd5e1;line-height:1.7;">
+    <div id="liveFeedPlaceholder" style="color:#475569;font-style:italic;">
+      Waiting for real-time scraping events... Start or resume the pipeline to watch live data stream in here.
+    </div>
+  </div>
+</div>
+
+<!-- Geographic Tile Map & Live Coverage Monitor (Section 7) -->
+<div class="card" style="padding:20px;margin-bottom:24px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <div style="font-weight:700;font-size:15px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+        <span>🗺️</span> Geographic Tile-Based Coverage &amp; Map Visualization
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+        Actual deterministic geographic tile rectangles projected on local canvas with real-time status and recursive subdivision tracking.
+      </div>
+    </div>
+
+    <!-- Filter & Zoom Controls -->
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:11.5px;color:var(--text-muted);">Territory:</label>
+        <select id="mapTerritorySelect" class="rail-search-input" style="width:170px;margin:0;font-size:11.5px;padding:4px 8px;" onchange="onMapTerritoryChanged()">
+          <!-- Populated by JS -->
+        </select>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:11.5px;color:var(--text-muted);">Category:</label>
+        <select id="mapCategorySelect" class="rail-search-input" style="width:130px;margin:0;font-size:11.5px;padding:4px 8px;" onchange="renderTileCanvas()">
+          <option value="all">All Categories</option>
+          {% for cat in categories %}
+          <option value="{{ cat.key }}">{{ cat.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:11.5px;color:var(--text-muted);">Status:</label>
+        <select id="mapStatusSelect" class="rail-search-input" style="width:120px;margin:0;font-size:11.5px;padding:4px 8px;" onchange="renderTileCanvas()">
+          <option value="all">All Statuses</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="subdivided">Subdivided</option>
+          <option value="retry_pending">Waiting Retry</option>
+          <option value="failed">Failed</option>
+          <option value="limit_reached">Limit Reached</option>
+          <option value="pending">Pending</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-secondary btn-sm" onclick="zoomTileCanvas(1.2)" title="Zoom In" style="padding:4px 8px;font-size:12px;">🔍+</button>
+        <button class="btn btn-secondary btn-sm" onclick="zoomTileCanvas(0.8)" title="Zoom Out" style="padding:4px 8px;font-size:12px;">🔍-</button>
+        <button class="btn btn-secondary btn-sm" onclick="resetTileCanvasView()" title="Fit View" style="padding:4px 8px;font-size:12px;">⟲ Fit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tile Metrics Counter Ribbon -->
+  <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;background:var(--bg-secondary);padding:8px 12px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);font-size:11.5px;">
+    <div>Total Tiles: <strong id="mapTileTotal" style="color:var(--text-primary);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Completed: <strong id="mapTileCompleted" style="color:var(--accent-green);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Running: <strong id="mapTileRunning" style="color:var(--accent-cyan);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Subdivided: <strong id="mapTileSubdivided" style="color:var(--accent-purple);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Waiting Retry: <strong id="mapTileRetry" style="color:var(--accent-amber);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Failed: <strong id="mapTileFailed" style="color:var(--accent-rose);">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Limit Cap: <strong id="mapTileLimit" style="color:#fb923c;">0</strong></div>
+    <div style="color:var(--border-subtle);">|</div>
+    <div>Pending: <strong id="mapTilePending" style="color:var(--text-muted);">0</strong></div>
+  </div>
+
+  <!-- Main Canvas & Inspector Side-by-Side -->
+  <div style="display:grid;grid-template-columns:minmax(0, 1fr) 300px;gap:16px;align-items:start;">
+    
+    <!-- Canvas Wrapper -->
+    <div style="position:relative;background:#090d16;border-radius:var(--radius-md);border:1px solid var(--border-highlight);overflow:hidden;">
+      <canvas id="tileMapCanvas" width="900" height="440" style="width:100%;height:440px;display:block;cursor:crosshair;"></canvas>
+      
+      <!-- Canvas Overlay Coordinates and Hint -->
+      <div style="position:absolute;bottom:8px;left:10px;font-size:10.5px;color:rgba(255,255,255,0.5);font-family:var(--font-mono);pointer-events:none;">
+        <span id="canvasCoordsText">Cursor: (0.0000, 0.0000)</span> | Drag to Pan, Scroll to Zoom
+      </div>
+
+      <!-- Live Legend -->
+      <div style="position:absolute;top:8px;left:10px;display:flex;gap:8px;flex-wrap:wrap;background:rgba(15,23,42,0.85);backdrop-filter:blur(4px);padding:4px 8px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.1);font-size:10px;pointer-events:none;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#10b981;border-radius:1px;"></span> Completed</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#38bdf8;border-radius:1px;"></span> Running</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#818cf8;border-radius:1px;"></span> Subdivided</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#f59e0b;border-radius:1px;"></span> Retry</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#f43f5e;border-radius:1px;"></span> Failed</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;background:#64748b;border-radius:1px;"></span> Pending</span>
+      </div>
+    </div>
+
+    <!-- Tile Inspector Card -->
+    <div id="tileInspectorCard" style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:14px;font-size:12px;">
+      <div style="font-weight:700;font-size:12.5px;color:var(--text-primary);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+        <span>🔍 Tile Inspector</span>
+        <span id="inspStatusBadge" class="badge" style="font-size:10px;background:rgba(100,116,139,0.2);color:var(--text-muted);">Hover Tile</span>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px;color:var(--text-secondary);">
+        <div><strong>Tile ID:</strong> <span id="inspTileId" style="font-family:var(--font-mono);color:var(--accent-cyan);word-break:break-all;">-</span></div>
+        <div><strong>Parent ID:</strong> <span id="inspParentId" style="font-family:var(--font-mono);">-</span></div>
+        <div><strong>Category:</strong> <span id="inspCategory" style="color:var(--text-primary);">-</span></div>
+        <div><strong>Depth:</strong> <span id="inspDepth">-</span> | <strong>Span:</strong> <span id="inspSpan">-</span></div>
+        <div><strong>Bounds:</strong>
+          <div id="inspBounds" style="font-size:11px;font-family:var(--font-mono);background:var(--bg-surface);padding:4px 6px;border-radius:var(--radius-sm);margin-top:2px;">
+            Lat: - to -<br>Lng: - to -
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px;">
+          <div style="background:var(--bg-surface);padding:6px;border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:10px;color:var(--text-muted);">Results</div>
+            <div id="inspResults" style="font-weight:700;color:var(--text-primary);font-size:14px;">0</div>
+          </div>
+          <div style="background:var(--bg-surface);padding:6px;border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:10px;color:var(--text-muted);">New Records</div>
+            <div id="inspNewRecords" style="font-weight:700;color:var(--accent-green);font-size:14px;">0</div>
+          </div>
+        </div>
+        <div><strong>Duplicates:</strong> <span id="inspDups">0</span> | <strong>Attempts:</strong> <span id="inspAttempts">0</span></div>
+        <div id="inspErrorBox" style="display:none;color:var(--accent-rose);font-size:11px;background:rgba(244,63,94,0.1);padding:4px 6px;border-radius:var(--radius-sm);">
+          <strong>Last Error:</strong> <span id="inspErrorText"></span>
+        </div>
+        <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">
+          Updated: <span id="inspUpdatedAt">-</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Configuration & Setup Card -->
+<div class="card" style="padding:20px;margin-bottom:24px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:15px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+      <span>⚙️</span> Pipeline Execution Configuration
+    </div>
+    <div style="font-size:11.5px;color:var(--text-muted);">
+      Configuration is automatically saved to SQLite
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:20px;">
+    
+    <!-- 1. Country & Territory Scope -->
+    <div>
+      <label style="display:block;font-size:12px;color:var(--text-secondary);font-weight:700;margin-bottom:6px;">
+        1. Target Country Scope
+      </label>
+      <select id="cfgCountry" class="rail-search-input" onchange="onScopeCountryChanged()">
+        <option value="both">Both United States &amp; Mexico (82 Territories)</option>
+        <option value="US" selected>United States Only (50 States)</option>
+        <option value="MX">Mexico Only (32 Federal Entities)</option>
+      </select>
+
+      <div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <label style="font-size:11.5px;color:var(--text-muted);font-weight:600;">Region / State Filter</label>
+          <div style="display:flex;gap:8px;">
+            <a href="javascript:void(0)" onclick="selectAllRegions(true)" style="font-size:11px;color:var(--accent-cyan);text-decoration:none;">Select All</a>
+            <span style="color:var(--border-subtle);">|</span>
+            <a href="javascript:void(0)" onclick="selectAllRegions(false)" style="font-size:11px;color:var(--text-muted);text-decoration:none;">Clear All</a>
+          </div>
+        </div>
+        <div id="regionsContainer" style="max-height:160px;overflow-y:auto;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 10px;display:grid;grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));gap:6px;">
+          <!-- Dynamically populated regions -->
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+          Selected: <span id="selectedRegionsCount" style="color:var(--accent-cyan);font-weight:600;">All</span> regions
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Business Categories -->
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <label style="font-size:12px;color:var(--text-secondary);font-weight:700;">
+          2. Business Categories
+        </label>
+        <div style="display:flex;gap:8px;">
+          <a href="javascript:void(0)" onclick="selectAllCategories(true)" style="font-size:11px;color:var(--accent-cyan);text-decoration:none;">All</a>
+          <span style="color:var(--border-subtle);">|</span>
+          <a href="javascript:void(0)" onclick="selectAllCategories(false)" style="font-size:11px;color:var(--text-muted);text-decoration:none;">Clear</a>
+        </div>
+      </div>
+      <div id="categoriesContainer" style="max-height:190px;overflow-y:auto;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 10px;display:grid;grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));gap:6px;">
+        {% for cat in categories %}
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+          <input type="checkbox" name="cfgCategory" value="{{ cat.key }}" checked onchange="saveConfigAndPlan()">
+          <span>{{ cat.label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px;">
+        <input type="text" id="customCategoryInput" placeholder="Add custom category tag..." class="rail-search-input" style="font-size:11.5px;padding:4px 8px;margin:0;" onkeydown="if(event.key==='Enter'){addCustomCategory();}">
+        <button class="btn btn-secondary btn-sm" onclick="addCustomCategory()" style="padding:4px 10px;">Add</button>
+      </div>
+    </div>
+
+    <!-- 3. Limits & Stage Toggles -->
+    <div>
+      <label style="display:block;font-size:12px;color:var(--text-secondary);font-weight:700;margin-bottom:8px;">
+        3. Automated Stages &amp; Safe Limits
+      </label>
+      
+      <!-- Stages checkboxes -->
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;padding:8px;background:var(--bg-secondary);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="stageToggleCollection" checked onchange="saveConfigAndPlan()">
+          <span style="font-weight:600;color:var(--accent-cyan);">Stage 1: Business Collection</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="stageToggleDiscovery" checked onchange="saveConfigAndPlan()">
+          <span style="font-weight:600;color:var(--accent-green);">Stage 2: Official Website Discovery</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="stageToggleEnrichment" checked onchange="saveConfigAndPlan()">
+          <span style="font-weight:600;color:var(--accent-purple);">Stage 3: Company Crawling &amp; Enrichment</span>
+        </label>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:600;">Collection Limit/Task</label>
+          <select id="cfgCollectionLimit" class="rail-search-input" onchange="saveConfigAndPlan()" style="margin:0;">
+            <option value="0" selected>All Available (No limit)</option>
+            <option value="25">25 places</option>
+            <option value="50">50 places (Safe)</option>
+            <option value="100">100 places</option>
+            <option value="200">200 places</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:600;">Max Crawl Pages</label>
+          <select id="cfgMaxPages" class="rail-search-input" onchange="saveConfigAndPlan()" style="margin:0;">
+            <option value="3">3 pages</option>
+            <option value="5" selected>5 pages</option>
+            <option value="10">10 pages</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:600;">Category Workers</label>
+          <select id="cfgCategoryWorkers" class="rail-search-input" onchange="saveConfigAndPlan()" style="margin:0;">
+            <option value="all">All Categories Concurrently (Unbounded Workers)</option>
+            <option value="1">1 (Sequential)</option>
+            <option value="2">2 workers</option>
+            <option value="3" selected>3 workers (Default)</option>
+            <option value="5">5 workers</option>
+            <option value="8">8 workers</option>
+            <option value="10">10 workers</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:600;">Request Concurrency</label>
+          <select id="cfgRequestConcurrency" class="rail-search-input" onchange="saveConfigAndPlan()" style="margin:0;">
+            <option value="1">1 req</option>
+            <option value="2">2 reqs</option>
+            <option value="3" selected>3 reqs (Default)</option>
+            <option value="5">5 reqs</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;">
+          <input type="checkbox" id="cfgResume" checked onchange="saveConfigAndPlan()">
+          <span>Resume from checkpoints (skip completed tasks)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;">
+          <input type="checkbox" id="cfgRetryFailed" onchange="saveConfigAndPlan()">
+          <span>Retry eligible failed tasks</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;color:var(--accent-cyan);font-weight:600;">
+          <input type="checkbox" id="cfgDryRun" onchange="saveConfigAndPlan()">
+          <span>Dry-Run Simulation (zero external network or writes)</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Plan Preview Modal / Accordion -->
+<div id="planPreviewCard" class="card" style="padding:18px 20px;margin-bottom:24px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);display:none;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div style="font-weight:700;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+      <span>📋</span> Planned Deterministic Execution Order
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('planPreviewCard').style.display='none'">
+      Close Preview
+    </button>
+  </div>
+  <div id="planPreviewSummary" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;"></div>
+  <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+    <table class="data-table" style="width:100%;font-size:11.5px;">
+      <thead>
+        <tr>
+          <th style="width:50px;">#</th>
+          <th>Country</th>
+          <th>Region</th>
+          <th>Category</th>
+          <th>Task ID</th>
+          <th>Current Status</th>
+          <th>Records</th>
+        </tr>
+      </thead>
+      <tbody id="planPreviewTableBody">
+        <!-- Rendered by previewPlan() -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Region-by-Region Progress Breakdown -->
+<div class="card" style="padding:20px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div style="font-weight:700;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+      <span>🗺️</span> Region-by-Region Execution Progress
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <input type="text" id="regionFilterInput" placeholder="Filter region..." class="rail-search-input" style="width:160px;margin:0;font-size:11.5px;padding:4px 8px;" oninput="filterRegionsTable(this.value)">
+      <button class="btn btn-secondary btn-sm" onclick="fetchLiveStatus()" style="padding:4px 10px;">Refresh</button>
+    </div>
+  </div>
+  <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+    <table class="data-table" style="width:100%;font-size:11.5px;" id="regionsProgressTable">
+      <thead>
+        <tr>
+          <th>Country</th>
+          <th>Code</th>
+          <th>Territory Name</th>
+          <th>Total Tasks</th>
+          <th>Completed</th>
+          <th>Pending</th>
+          <th>Failed</th>
+          <th>State Progress</th>
+          <th>Complete?</th>
+        </tr>
+      </thead>
+      <tbody id="regionsProgressTableBody">
+        <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;">Loading territory progress...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- State-Wise & Category-Wise Persistent Exports (Section 6 & 7) -->
+<div class="card" style="margin-top:24px;padding:20px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="font-weight:700;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+        <span>📦</span> State-Wise, Date-Wise &amp; Category-Wise Exports
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+        Organized by <code>data/exports/YYYY-MM-DD/COUNTRY/REGION_NAME_REGION_CODE/</code> with deterministic CSVs and verified <code>run_summary.json</code>.
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-secondary btn-sm" onclick="fetchStateExports()" style="padding:4px 10px;">🔄 Refresh Exports</button>
+    </div>
+  </div>
+
+  <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+    <table class="data-table" style="width:100%;font-size:11.5px;" id="stateExportsTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Country</th>
+          <th>Territory Folder</th>
+          <th>Businesses</th>
+          <th>Categories Exported</th>
+          <th>Completeness</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="stateExportsTableBody">
+        <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">No state exports recorded yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Planned Pipeline Roadmap (Non-operational) Section -->
+<div class="card" style="margin-top:24px;padding:20px;background:var(--bg-surface);border:1px dashed var(--border-subtle);border-radius:var(--radius-lg);opacity:0.85;">
+  <div style="font-weight:700;font-size:13.5px;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+    <span>🔒</span> Planned Pipeline Roadmap (Non-Operational in Step 3)
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;">
+    <div style="background:var(--bg-main);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:var(--text-primary);font-size:13px;">Step 4 — Contact Validation &amp; Reconciliation</strong>
+        <span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">PLANNED</span>
+      </div>
+      <p style="font-size:11.5px;color:var(--text-muted);margin:0;line-height:1.5;">
+        Automated mailbox deliverability pinging, phone syntax &amp; line verification, deduplication, and safe multi-source reconciliation.
+      </p>
+    </div>
+    <div style="background:var(--bg-main);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:var(--text-primary);font-size:13px;">Step 5 — Weekly Orchestration &amp; Scheduling</strong>
+        <span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">PLANNED</span>
+      </div>
+      <p style="font-size:11.5px;color:var(--text-muted);margin:0;line-height:1.5;">
+        Autonomous recurring state-wise scraping cycles, checkpointed delta updates, and scheduled exports.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const US_STATES = {{ us_states | tojson }};
+const MX_ENTITIES = {{ mexico_entities | tojson }};
+const SAVED_CONFIG = {{ saved_config | tojson }};
+
+let eventSource = null;
+let currentOrchestratorStatus = null;
+
+// Initialize on page load
+document.addEventListener("DOMContentLoaded", () => {
+  applySavedConfig(SAVED_CONFIG);
+  initEventSource();
+  fetchLiveStatus();
+  setInterval(fetchLiveStatus, 3000);
+});
+
+function applySavedConfig(cfg) {
+  if (!cfg) return;
+  if (cfg.country) document.getElementById("cfgCountry").value = cfg.country;
+  if (cfg.collection_limit) document.getElementById("cfgCollectionLimit").value = cfg.collection_limit;
+  if (cfg.max_crawl_pages) document.getElementById("cfgMaxPages").value = cfg.max_crawl_pages;
+  if (cfg.resume_checkpoint !== undefined) document.getElementById("cfgResume").checked = cfg.resume_checkpoint;
+  if (cfg.retry_failed !== undefined) document.getElementById("cfgRetryFailed").checked = cfg.retry_failed;
+  if (cfg.dry_run !== undefined) document.getElementById("cfgDryRun").checked = cfg.dry_run;
+
+  if (cfg.stages) {
+    document.getElementById("stageToggleCollection").checked = cfg.stages.collection !== false;
+    document.getElementById("stageToggleDiscovery").checked = cfg.stages.discovery !== false;
+    document.getElementById("stageToggleEnrichment").checked = cfg.stages.enrichment !== false;
+  }
+
+  // Populate regions
+  populateRegionsList(cfg.country || "both", cfg.regions || null);
+
+  // Check categories
+  if (cfg.categories && Array.isArray(cfg.categories)) {
+    const catSet = new Set(cfg.categories);
+    document.querySelectorAll("input[name='cfgCategory']").forEach(cb => {
+      cb.checked = catSet.has(cb.value);
+    });
+  }
+}
+
+function onScopeCountryChanged() {
+  const c = document.getElementById("cfgCountry").value;
+  populateRegionsList(c, null);
+  saveConfigAndPlan();
+}
+
+function populateRegionsList(country, preselected) {
+  const container = document.getElementById("regionsContainer");
+  container.innerHTML = "";
+
+  let list = [];
+  if (country === "both" || country === "US") {
+    Object.keys(US_STATES).sort().forEach(code => {
+      list.push({ country: "US", code: code, name: US_STATES[code].name });
+    });
+  }
+  if (country === "both" || country === "MX") {
+    Object.keys(MX_ENTITIES).sort().forEach(code => {
+      list.push({ country: "MX", code: code, name: MX_ENTITIES[code].name });
+    });
+  }
+
+  const preSet = preselected ? new Set(preselected) : null;
+
+  list.forEach(item => {
+    const isChecked = preSet ? preSet.has(item.code) : true;
+    const label = document.createElement("label");
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+    label.style.gap = "6px";
+    label.style.fontSize = "11.5px";
+    label.style.cursor = "pointer";
+    label.innerHTML = `
+      <input type="checkbox" name="cfgRegion" value="${item.code}" ${isChecked ? 'checked' : ''} onchange="updateSelectedRegionsCount(); saveConfigAndPlan();">
+      <span>${item.code} <span style="color:var(--text-muted);font-size:10px;">(${item.country})</span></span>
+    `;
+    container.appendChild(label);
+  });
+
+  updateSelectedRegionsCount();
+}
+
+function updateSelectedRegionsCount() {
+  const all = document.querySelectorAll("input[name='cfgRegion']");
+  const checked = document.querySelectorAll("input[name='cfgRegion']:checked");
+  const badge = document.getElementById("selectedRegionsCount");
+  if (checked.length === all.length) {
+    badge.innerText = `All (${all.length})`;
+  } else {
+    badge.innerText = `${checked.length} / ${all.length}`;
+  }
+}
+
+function selectAllRegions(check) {
+  document.querySelectorAll("input[name='cfgRegion']").forEach(cb => cb.checked = check);
+  updateSelectedRegionsCount();
+  saveConfigAndPlan();
+}
+
+function selectAllCategories(check) {
+  document.querySelectorAll("input[name='cfgCategory']").forEach(cb => cb.checked = check);
+  saveConfigAndPlan();
+}
+
+function addCustomCategory() {
+  const input = document.getElementById("customCategoryInput");
+  const val = input.value.trim().toLowerCase();
+  if (!val) return;
+
+  const container = document.getElementById("categoriesContainer");
+  const label = document.createElement("label");
+  label.style.display = "flex";
+  label.style.alignItems = "center";
+  label.style.gap = "6px";
+  label.style.fontSize = "11.5px";
+  label.style.color = "var(--text-primary)";
+  label.style.cursor = "pointer";
+  label.innerHTML = `
+    <input type="checkbox" name="cfgCategory" value="${escapeHtml(val)}" checked onchange="saveConfigAndPlan()">
+    <span>${escapeHtml(val)}</span>
+  `;
+  container.appendChild(label);
+  input.value = "";
+  saveConfigAndPlan();
+}
+
+async function safeApiRequest(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get("content-type") || "";
+    const isJson = contentType.toLowerCase().includes("application/json");
+
+    let data = null;
+    let text = "";
+
+    if (isJson) {
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        return {
+          ok: false,
+          status: res.status,
+          error: `Malformed JSON response (HTTP ${res.status}): ${jsonErr.message}`,
+          data: null
+        };
+      }
+    } else {
+      text = await res.text();
+    }
+
+    if (!res.ok) {
+      let errorMsg = "";
+      if (data) {
+        if (typeof data.detail === "string") {
+          errorMsg = data.detail;
+        } else if (Array.isArray(data.detail)) {
+          errorMsg = data.detail.map(d => typeof d === "string" ? d : (d.msg || JSON.stringify(d))).join("; ");
+        } else if (data.error) {
+          errorMsg = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+        } else {
+          errorMsg = JSON.stringify(data);
+        }
+      } else {
+        const safeSnippet = text.trim().substring(0, 140).replace(/<[^>]*>/g, " ").trim();
+        errorMsg = `Server error (HTTP ${res.status}): ${safeSnippet || res.statusText || "Unexpected response"}`;
+      }
+      return {
+        ok: false,
+        status: res.status,
+        error: errorMsg,
+        data: data
+      };
+    }
+
+    return {
+      ok: true,
+      status: res.status,
+      data: isJson ? data : text,
+      error: null
+    };
+  } catch (netErr) {
+    return {
+      ok: false,
+      status: 0,
+      error: `Network/connection error: ${netErr.message || "Failed to reach server"}`,
+      data: null
+    };
+  }
+}
+
+function getConfigurationPayload() {
+  const country = document.getElementById("cfgCountry")?.value || "US";
+  const allRegions = document.querySelectorAll("input[name='cfgRegion']");
+  const checkedRegions = document.querySelectorAll("input[name='cfgRegion']:checked");
+
+  let regions = null;
+  if (checkedRegions.length > 0 && checkedRegions.length < allRegions.length) {
+    regions = Array.from(checkedRegions).map(cb => cb.value);
+  }
+
+  let categories = Array.from(document.querySelectorAll("input[name='cfgCategory']:checked")).map(cb => cb.value);
+  if (categories.length === 0) {
+    categories = [
+      "healthcare", "hospitality", "food", "retail", "fitness",
+      "beauty", "automotive", "finance", "education", "real_estate"
+    ];
+  }
+
+  const collectionLimitRaw = document.getElementById("cfgCollectionLimit")?.value;
+  const collectionLimit = parseInt(collectionLimitRaw, 10);
+  const safeCollectionLimit = isNaN(collectionLimit) ? null : (collectionLimit > 0 ? collectionLimit : null);
+
+  const maxPagesRaw = document.getElementById("cfgMaxPages")?.value;
+  const maxPages = parseInt(maxPagesRaw, 10);
+  const safeMaxPages = isNaN(maxPages) ? 5 : maxPages;
+
+  const workersRaw = document.getElementById("cfgCategoryWorkers")?.value;
+  let safeWorkers = 3;
+  let allConcurrent = false;
+  if (!workersRaw || workersRaw === "all" || workersRaw === "0") {
+    safeWorkers = "all";
+    allConcurrent = true;
+  } else {
+    const parsed = parseInt(workersRaw, 10);
+    safeWorkers = isNaN(parsed) ? "all" : (parsed > 0 ? parsed : "all");
+    allConcurrent = (safeWorkers === "all");
+  }
+
+  const reqConcurrencyRaw = document.getElementById("cfgRequestConcurrency")?.value;
+  const reqConcurrency = parseInt(reqConcurrencyRaw, 10);
+  const safeReqConcurrency = isNaN(reqConcurrency) ? 3 : (reqConcurrency > 0 ? reqConcurrency : 3);
+
+  const resume = !!document.getElementById("cfgResume")?.checked;
+  const retryFailed = !!document.getElementById("cfgRetryFailed")?.checked;
+  const dryRun = !!document.getElementById("cfgDryRun")?.checked;
+
+  const stages = {
+    collection: document.getElementById("stageToggleCollection") ? document.getElementById("stageToggleCollection").checked : true,
+    discovery: document.getElementById("stageToggleDiscovery") ? document.getElementById("stageToggleDiscovery").checked : true,
+    enrichment: document.getElementById("stageToggleEnrichment") ? document.getElementById("stageToggleEnrichment").checked : true,
+  };
+
+  return {
+    country: country,
+    regions: regions,
+    categories: categories,
+    category_workers: safeWorkers,
+    all_categories_concurrent: allConcurrent,
+    request_concurrency: safeReqConcurrency,
+    collection_limit: safeCollectionLimit,
+    batch_size: 50,
+    max_crawl_pages: safeMaxPages,
+    stages: stages,
+    resume_checkpoint: resume,
+    retry_failed: retryFailed,
+    dry_run: dryRun,
+    max_retries: 2,
+  };
+}
+
+let saveTimer = null;
+function saveConfigAndPlan() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    const payload = getConfigurationPayload();
+    const res = await safeApiRequest("/api/pipeline/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      console.warn("Auto-save config failed:", res.error);
+    }
+  }, 400);
+}
+
+async function previewPlan() {
+  const payload = getConfigurationPayload();
+  const card = document.getElementById("planPreviewCard");
+  const summary = document.getElementById("planPreviewSummary");
+  const tbody = document.getElementById("planPreviewTableBody");
+
+  card.style.display = "block";
+  summary.innerHTML = '<span style="color:var(--accent-cyan);">Generating execution plan...</span>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:12px;">Loading plan...</td></tr>';
+
+  const res = await safeApiRequest("/api/pipeline/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    summary.innerHTML = `<span style="color:var(--accent-rose);">Error generating plan: ${escapeHtml(res.error)}</span>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-rose);padding:12px;">Plan generation failed: ${escapeHtml(res.error)}</td></tr>`;
+    return;
+  }
+
+  const plan = res.data || {};
+  const counts = plan.counts || {};
+  summary.innerHTML = `
+    Scope: <strong>${(plan.scope_summary?.countries || []).join(', ')}</strong> |
+    Territories: <strong>${plan.scope_summary?.regions_count || 0}</strong> |
+    Categories: <strong>${plan.scope_summary?.categories_count || 0}</strong> |
+    Stage 1 Tasks: <strong>${counts.total_stage1_tasks || 0}</strong> (Completed: <span style="color:var(--accent-green);">${counts.completed_stage1_tasks || 0}</span>, Failed: <span style="color:var(--accent-rose);">${counts.failed_stage1_tasks || 0}</span>)
+  `;
+
+  tbody.innerHTML = "";
+  (plan.stage_1_tasks || []).forEach((t, idx) => {
+    const tr = document.createElement("tr");
+    const stColor = t.status === 'completed' ? 'var(--accent-green)' : t.status === 'failed' ? 'var(--accent-rose)' : t.status === 'in_progress' ? 'var(--accent-amber)' : 'var(--text-muted)';
+    tr.innerHTML = `
+      <td style="color:var(--text-muted);">${idx + 1}</td>
+      <td><span class="badge" style="background:rgba(56,189,248,0.1);color:var(--accent-cyan);font-size:10px;">${t.country_code}</span></td>
+      <td><strong>${t.region_code}</strong></td>
+      <td>${escapeHtml(t.region_name)}</td>
+      <td><span style="color:var(--accent-amber);">${escapeHtml(t.category)}</span></td>
+      <td><span style="color:${stColor};font-weight:700;font-size:10.5px;">${t.status.toUpperCase()}</span></td>
+      <td style="text-align:right;">${t.records_collected || 0}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function startPipeline() {
+  const payload = getConfigurationPayload();
+  const btn = document.getElementById("btnStart");
+  btn.disabled = true;
+
+  try {
+    const res = await safeApiRequest("/api/pipeline/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      await fetchLiveStatus();
+    } else {
+      alert("Cannot start pipeline: " + res.error);
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pausePipeline() {
+  const res = await safeApiRequest("/api/pipeline/pause", { method: "POST" });
+  if (!res.ok) {
+    alert("Cannot pause pipeline: " + res.error);
+  }
+  await fetchLiveStatus();
+}
+
+async function resumePipeline() {
+  const res = await safeApiRequest("/api/pipeline/resume", { method: "POST" });
+  if (!res.ok) {
+    alert("Cannot resume pipeline: " + res.error);
+  }
+  await fetchLiveStatus();
+}
+
+async function cancelPipeline() {
+  if (!confirm("Are you sure you want to cancel the active pipeline run?")) return;
+  const res = await safeApiRequest("/api/pipeline/cancel", { method: "POST" });
+  if (!res.ok) {
+    alert("Cannot cancel pipeline: " + res.error);
+  }
+  await fetchLiveStatus();
+}
+
+async function retryFailedTasks() {
+  const res = await safeApiRequest("/api/pipeline/retry-failed", { method: "POST" });
+  if (!res.ok) {
+    alert("Cannot retry failed tasks: " + res.error);
+    return;
+  }
+  const data = res.data || {};
+  alert(`Reset ${data.reset_count || 0} failed tasks to 'pending' status.`);
+  await fetchLiveStatus();
+}
+
+async function fetchLiveStatus() {
+  const res = await safeApiRequest("/api/pipeline/status");
+  if (res.ok && res.data) {
+    renderLiveStatus(res.data);
+  }
+}
+
+function renderLiveStatus(status) {
+  if (!status) return;
+  currentOrchestratorStatus = status;
+
+  const st = (status.status || "idle").toUpperCase();
+  const badge = document.getElementById("orchestratorLiveBadge");
+  const btnStart = document.getElementById("btnStart");
+  const btnPause = document.getElementById("btnPause");
+  const btnResume = document.getElementById("btnResume");
+  const btnCancel = document.getElementById("btnCancel");
+
+  badge.innerText = status.dry_run ? `${st} (DRY-RUN)` : st;
+
+  if (st === "RUNNING") {
+    badge.style.background = "rgba(16,185,129,0.2)";
+    badge.style.color = "#10b981";
+    btnStart.style.display = "none";
+    btnPause.style.display = "inline-flex";
+    btnPause.disabled = false;
+    btnResume.style.display = "none";
+    btnCancel.style.display = "inline-flex";
+    btnCancel.disabled = false;
+    btnCancel.innerText = "Cancel Run";
+  } else if (st === "PAUSED") {
+    badge.style.background = "rgba(245,158,11,0.2)";
+    badge.style.color = "#f59e0b";
+    btnStart.style.display = "none";
+    btnPause.style.display = "none";
+    btnResume.style.display = "inline-flex";
+    btnResume.disabled = false;
+    btnCancel.style.display = "inline-flex";
+    btnCancel.disabled = false;
+    btnCancel.innerText = "Cancel Run";
+  } else if (st === "CANCELLING") {
+    badge.style.background = "rgba(244,63,94,0.18)";
+    badge.style.color = "var(--accent-rose)";
+    btnStart.style.display = "none";
+    btnPause.style.display = "none";
+    btnResume.style.display = "none";
+    btnCancel.style.display = "inline-flex";
+    btnCancel.disabled = true;
+    btnCancel.innerText = "Cancelling...";
+  } else if (st === "CANCELLED") {
+    badge.style.background = "rgba(244,63,94,0.18)";
+    badge.style.color = "var(--accent-rose)";
+    btnStart.style.display = "inline-flex";
+    btnStart.disabled = false;
+    btnStart.innerText = "▶ Start Pipeline (Resume)";
+    btnPause.style.display = "none";
+    btnResume.style.display = "none";
+    btnCancel.style.display = "none";
+  } else {
+    badge.style.background = "rgba(100,116,139,0.2)";
+    badge.style.color = "var(--text-muted)";
+    btnStart.style.display = "inline-flex";
+    btnStart.disabled = false;
+    btnStart.innerText = "▶ Start Automated Pipeline";
+    btnPause.style.display = "none";
+    btnResume.style.display = "none";
+    btnCancel.style.display = "none";
+  }
+
+  // Active run info
+  document.getElementById("activeRunIdBadge").innerText = status.active_run_id ? `[${status.active_run_id}]` : (status.latest_run ? `[Last: ${status.latest_run.run_id}]` : "");
+  
+  const stage = status.current_stage || "idle";
+  let stageLabel = "Idle";
+  if (st === "CANCELLED" || st === "CANCELLING") {
+    let stoppedAt = "Stage 1: Business Collection";
+    if (stage === "stage_2_discovery") stoppedAt = "Stage 2: Official Website Discovery";
+    else if (stage === "stage_3_enrichment") stoppedAt = "Stage 3: Company Crawling & Enrichment";
+    else if (stage === "stage_1_collection") stoppedAt = "Stage 1: Business Collection";
+    stageLabel = st === "CANCELLING" ? `Cancelling (stopping at ${stoppedAt})...` : `Cancelled (stopped at ${stoppedAt})`;
+  } else if (stage === "stage_1_collection") {
+    stageLabel = "Stage 1: Business Collection";
+  } else if (stage === "stage_2_discovery") {
+    stageLabel = "Stage 2: Official Website Discovery";
+  } else if (stage === "stage_3_enrichment") {
+    stageLabel = "Stage 3: Company Crawling & Enrichment";
+  } else if (stage === "completed") {
+    stageLabel = "Completed Successfully";
+  }
+  document.getElementById("activeStageLabel").innerText = stageLabel;
+
+  // Active target
+  const cTarget = status.current_country && status.current_region ? `${status.current_country} - ${status.current_region}` : (status.current_country || "All");
+  const catTarget = status.current_category ? ` (Category: ${status.current_category})` : "";
+  document.getElementById("activeTargetText").innerText = `${cTarget}${catTarget}`;
+
+  // Stage indicator pills
+  const isCancelled = (st === "CANCELLED" || st === "CANCELLING");
+  updateStagePill("pillStage1", stage, "stage_1_collection", isCancelled);
+  updateStagePill("pillStage2", stage, "stage_2_discovery", isCancelled);
+  updateStagePill("pillStage3", stage, "stage_3_enrichment", isCancelled);
+
+  // Metrics
+  const tc = status.task_counts || {};
+  document.getElementById("metricCompletedTasks").innerText = tc.completed || 0;
+  document.getElementById("metricPendingTasks").innerText = `${tc.pending || 0} / ${tc.in_progress || 0}`;
+  document.getElementById("metricFailedTasks").innerText = tc.failed || 0;
+  document.getElementById("failedTaskCountBadge").innerText = tc.failed || 0;
+
+  document.getElementById("metricBusinesses").innerText = status.total_businesses_collected || 0;
+  document.getElementById("metricVerifiedWebsites").innerText = status.websites_verified || 0;
+  document.getElementById("metricEnrichedCompanies").innerText = status.companies_enriched || 0;
+
+  // Progress Bar
+  const totalT = tc.total || 0;
+  const compT = tc.completed || 0;
+  const pct = totalT > 0 ? Math.round((compT / totalT) * 100) : (stage === 'completed' ? 100 : 0);
+  document.getElementById("progressPctText").innerText = `${pct}%`;
+  document.getElementById("orchestratorProgressBar").style.width = `${pct}%`;
+
+  // Error alert
+  const errBox = document.getElementById("recentErrorBox");
+  if (status.recent_errors && status.recent_errors.length > 0) {
+    const lastErr = status.recent_errors[status.recent_errors.length - 1];
+    errBox.style.display = "block";
+    document.getElementById("recentErrorText").innerText = `[${lastErr.country}-${lastErr.region}] ${lastErr.category}: ${lastErr.error}`;
+  } else {
+    errBox.style.display = "none";
+  }
+
+  // Region Progress Table
+  renderRegionsTable(status.regions_progress || []);
+}
+
+function updateStagePill(pillId, activeStage, thisStageName, isCancelled = false) {
+  const el = document.getElementById(pillId);
+  if (!el) return;
+  const stages = ["stage_1_collection", "stage_2_discovery", "stage_3_enrichment", "completed"];
+  const aIdx = stages.indexOf(activeStage);
+  const tIdx = stages.indexOf(thisStageName);
+
+  if (activeStage === thisStageName) {
+    if (isCancelled) {
+      el.style.borderColor = "rgba(244,63,94,0.4)";
+      el.style.background = "rgba(244,63,94,0.12)";
+      el.style.color = "var(--accent-rose)";
+      el.querySelector(".stage-icon").innerText = "⏹";
+    } else {
+      el.style.borderColor = "var(--accent-cyan)";
+      el.style.background = "var(--accent-cyan-glow)";
+      el.style.color = "var(--accent-cyan)";
+      el.querySelector(".stage-icon").innerText = "⚙";
+    }
+  } else if (aIdx > tIdx || activeStage === "completed") {
+    el.style.borderColor = "rgba(16,185,129,0.3)";
+    el.style.background = "rgba(16,185,129,0.1)";
+    el.style.color = "var(--accent-green)";
+    el.querySelector(".stage-icon").innerText = "✓";
+  } else {
+    el.style.borderColor = "var(--border-subtle)";
+    el.style.background = "var(--bg-surface)";
+    el.style.color = "var(--text-muted)";
+    el.querySelector(".stage-icon").innerText = "●";
+  }
+}
+
+function renderRegionsTable(regions) {
+  const tbody = document.getElementById("regionsProgressTableBody");
+  if (!regions || regions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;">No territory tasks tracked yet. Click "Preview Plan" or "Start Pipeline".</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = "";
+  regions.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.dataset.query = `${r.country_code} ${r.region_code} ${r.region_name}`.toLowerCase();
+    const isComp = r.is_complete;
+    const pct = r.total > 0 ? Math.round((r.completed / r.total) * 100) : 0;
+    tr.innerHTML = `
+      <td><span class="badge" style="background:rgba(56,189,248,0.1);color:var(--accent-cyan);font-size:10px;">${r.country_code}</span></td>
+      <td><strong>${r.region_code}</strong></td>
+      <td>${escapeHtml(r.region_name)}</td>
+      <td style="text-align:right;">${r.total}</td>
+      <td style="text-align:right;color:var(--accent-green);font-weight:600;">${r.completed}</td>
+      <td style="text-align:right;color:var(--accent-amber);">${r.pending}</td>
+      <td style="text-align:right;color:${r.failed > 0 ? 'var(--accent-rose)' : 'var(--text-muted)'};font-weight:${r.failed > 0 ? '700' : 'normal'};">${r.failed}</td>
+      <td style="width:140px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:var(--radius-full);overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${isComp ? 'var(--accent-green)' : 'var(--accent-cyan)'};"></div>
+          </div>
+          <span style="font-size:10px;color:var(--text-muted);width:30px;text-align:right;">${pct}%</span>
+        </div>
+      </td>
+      <td style="text-align:center;">
+        ${isComp ? '<span style="color:var(--accent-green);font-weight:700;">YES</span>' : '<span style="color:var(--text-muted);">NO</span>'}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterRegionsTable(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll("#regionsProgressTableBody tr").forEach(tr => {
+    if (!q || !tr.dataset.query) {
+      tr.style.display = "";
+    } else {
+      tr.style.display = tr.dataset.query.includes(q) ? "" : "none";
+    }
+  });
+}
+
+let liveSessionNewCount = 0;
+
+function clearLiveFeed() {
+  const feed = document.getElementById("liveScrapingFeed");
+  if (feed) {
+    feed.innerHTML = '<div style="color:#475569;font-style:italic;">Feed cleared. Waiting for new scraping events...</div>';
+  }
+}
+
+function handleLiveScrapingEvent(payload) {
+  if (!payload || !payload.event) return;
+  const ev = payload.event;
+  const data = payload.data || {};
+  const feed = document.getElementById("liveScrapingFeed");
+  const placeholder = document.getElementById("liveFeedPlaceholder");
+  if (placeholder && placeholder.parentNode) {
+    placeholder.parentNode.removeChild(placeholder);
+  }
+
+  const now = new Date();
+  const timeStr = now.toTimeString().split(' ')[0];
+
+  if (ev === "tile_completed" || ev === "tile_subdivided") {
+    const newInTile = data.new_in_tile || data.new_records || 0;
+    const cat = data.category || "";
+    const reg = `${data.country || 'US'}-${data.region || ''}`;
+    const catNew = data.category_new || 0;
+    const tot = data.businesses_collected || data.total_unique || 0;
+
+    // 1. Update session total
+    if (newInTile > 0) {
+      liveSessionNewCount += newInTile;
+      const sessEl = document.getElementById("liveSessionNewCount");
+      if (sessEl) sessEl.innerText = `+${liveSessionNewCount.toLocaleString()}`;
+    }
+
+    // 2. Update category live tally badge
+    if (cat) {
+      const badge = document.getElementById(`catLiveBadge_${cat}`);
+      const chip = document.getElementById(`catLiveChip_${cat}`);
+      if (badge) {
+        badge.innerText = `+${catNew}`;
+        if (catNew > 0) {
+          badge.style.color = "#10b981";
+          badge.style.background = "rgba(16,185,129,0.2)";
+          if (chip) chip.style.borderColor = "#10b981";
+        }
+      }
+    }
+
+    // 3. Update top businesses collected metric immediately
+    if (tot > 0) {
+      const bMetric = document.getElementById("metricBusinesses");
+      if (bMetric) bMetric.innerText = tot.toLocaleString();
+    }
+
+    // 4. Append to Live Feed if new places were found
+    if (newInTile > 0 && feed) {
+      const entry = document.createElement("div");
+      entry.style.cssText = "padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;gap:8px;flex-wrap:wrap;align-items:center;";
+      entry.innerHTML = `
+        <span style="color:#64748b;font-size:11px;">[${timeStr}]</span>
+        <span style="color:#38bdf8;font-weight:700;">⚡ [${reg}]</span>
+        <span style="color:#f8fafc;font-weight:600;">${cat}</span>:
+        <span style="color:#10b981;font-weight:700;background:rgba(16,185,129,0.15);padding:1px 6px;border-radius:4px;">+${newInTile} places</span>
+        <span style="color:#94a3b8;font-size:11.5px;">(Cat Total: <strong style="color:#cbd5e1;">+${catNew}</strong> | DB Total: <strong style="color:#38bdf8;">${tot.toLocaleString()}</strong>)</span>
+        <span style="color:#475569;font-size:10.5px;">${data.tile_id || ''}</span>
+      `;
+      feed.appendChild(entry);
+
+      // Keep maximum 150 entries in memory
+      while (feed.children.length > 150) {
+        feed.removeChild(feed.firstChild);
+      }
+
+      // Auto-scroll
+      const autoScroll = document.getElementById("liveFeedAutoScroll");
+      if (autoScroll && autoScroll.checked) {
+        feed.scrollTop = feed.scrollHeight;
+      }
+    }
+  } else if (ev === "task_completed" && feed) {
+    const cat = data.category || "";
+    const reg = `${data.country || 'US'}-${data.region || ''}`;
+    const n = data.new_records || data.records_collected || 0;
+    const entry = document.createElement("div");
+    entry.style.cssText = "padding:4px 0;border-bottom:1px solid rgba(16,185,129,0.15);background:rgba(16,185,129,0.05);color:#10b981;font-weight:600;";
+    entry.innerHTML = `
+      <span style="color:#64748b;font-size:11px;">[${timeStr}]</span>
+      <span>✓ [${reg}] Category '<strong>${cat}</strong>' completed! (+${n} new places)</span>
+    `;
+    feed.appendChild(entry);
+    const autoScroll = document.getElementById("liveFeedAutoScroll");
+    if (autoScroll && autoScroll.checked) feed.scrollTop = feed.scrollHeight;
+  } else if (ev === "region_completed" && feed) {
+    const regName = data.region_name || data.region || "";
+    const entry = document.createElement("div");
+    entry.style.cssText = "padding:5px 0;margin:4px 0;border-top:1px dashed #38bdf8;border-bottom:1px dashed #38bdf8;color:#38bdf8;font-weight:700;";
+    entry.innerHTML = `[${timeStr}] ═══ All categories completed for ${regName}! Advancing to next territory... ═══`;
+    feed.appendChild(entry);
+    const autoScroll = document.getElementById("liveFeedAutoScroll");
+    if (autoScroll && autoScroll.checked) feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+function initEventSource() {
+  if (eventSource) return;
+  try {
+    eventSource = new EventSource("/api/pipeline/events");
+    eventSource.onmessage = (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        handleLiveScrapingEvent(payload);
+
+        if (payload.event === "init") {
+          renderLiveStatus(payload.data);
+        } else if (payload.event && payload.event.startsWith("tile_")) {
+          // Live tile update from active scraping
+          if (payload.data && payload.data.region) {
+            const currentSel = document.getElementById("mapTerritorySelect").value;
+            const targetVal = `${payload.data.country || 'US'}:${payload.data.region}`;
+            if (currentSel === targetVal) {
+              loadTerritoryTiles(false);
+            }
+          }
+          fetchLiveStatus();
+        } else if (payload.event === "state_exported") {
+          fetchStateExports();
+          fetchLiveStatus();
+        } else {
+          fetchLiveStatus();
+        }
+      } catch (err) {}
+    };
+    eventSource.onerror = () => {
+      // Automatic reconnect by browser
+    };
+  } catch (err) {
+    console.warn("SSE not available, falling back to polling.");
+  }
+}
+
+// --------------------------------------------------------------------------
+// Geographic Tile Map Canvas & Inspector Implementation
+// --------------------------------------------------------------------------
+let mapTiles = [];
+let hoveredTile = null;
+let selectedTile = null;
+let canvasPan = { x: 0, y: 0 };
+let canvasZoom = 1.0;
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+let territoryBounds = null;
+
+function populateTerritorySelector() {
+  const select = document.getElementById("mapTerritorySelect");
+  select.innerHTML = "";
+
+  const usGroup = document.createElement("optgroup");
+  usGroup.label = "United States (50 States)";
+  Object.keys(US_STATES).sort().forEach(code => {
+    const opt = document.createElement("option");
+    opt.value = `US:${code}`;
+    opt.textContent = `US: ${code} - ${US_STATES[code].name}`;
+    usGroup.appendChild(opt);
+  });
+  select.appendChild(usGroup);
+
+  const mxGroup = document.createElement("optgroup");
+  mxGroup.label = "Mexico (32 Entities)";
+  Object.keys(MX_ENTITIES).sort().forEach(code => {
+    const opt = document.createElement("option");
+    opt.value = `MX:${code}`;
+    opt.textContent = `MX: ${code} - ${MX_ENTITIES[code].name}`;
+    mxGroup.appendChild(opt);
+  });
+  select.appendChild(mxGroup);
+
+  // Default to AK or first
+  select.value = "US:AK";
+}
+
+function onMapTerritoryChanged() {
+  resetTileCanvasView();
+  loadTerritoryTiles(true);
+}
+
+async function loadTerritoryTiles(fitView = false) {
+  const val = document.getElementById("mapTerritorySelect").value || "US:AK";
+  const [country, region] = val.split(":");
+  
+  const res = await safeApiRequest(`/api/pipeline/tiles?country=${country}&region=${region}`);
+  if (!res.ok) {
+    console.warn("Could not load tiles for territory:", res.error);
+    return;
+  }
+
+  const data = res.data || {};
+  mapTiles = data.tiles || [];
+  territoryBounds = data.bounds || null;
+
+  // Update Ribbon Counters
+  const counts = data.counts || {};
+  document.getElementById("mapTileTotal").innerText = counts.total || 0;
+  document.getElementById("mapTileCompleted").innerText = counts.completed || 0;
+  document.getElementById("mapTileRunning").innerText = counts.running || 0;
+  document.getElementById("mapTileSubdivided").innerText = counts.subdivided || 0;
+  document.getElementById("mapTileRetry").innerText = counts.retry_pending || 0;
+  document.getElementById("mapTileFailed").innerText = counts.failed || 0;
+  document.getElementById("mapTileLimit").innerText = counts.limit_reached || 0;
+  document.getElementById("mapTilePending").innerText = counts.pending || 0;
+
+  if (fitView) {
+    resetTileCanvasView();
+  }
+  renderTileCanvas();
+}
+
+function initTileMap() {
+  const canvas = document.getElementById("tileMapCanvas");
+  if (!canvas) return;
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    renderTileCanvas();
+  }
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  // Mouse drag pan
+  canvas.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    dragStart = { x: e.clientX - canvasPan.x, y: e.clientY - canvasPan.y };
+    canvas.style.cursor = "grabbing";
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (isDragging) {
+      canvasPan.x = e.clientX - dragStart.x;
+      canvasPan.y = e.clientY - dragStart.y;
+      renderTileCanvas();
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      canvas.style.cursor = "crosshair";
+    }
+  });
+
+  // Zoom with wheel
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+    zoomTileCanvas(zoomFactor, e.offsetX, e.offsetY);
+  }, { passive: false });
+
+  // Hover detection and coordinate display
+  canvas.addEventListener("mousemove", (e) => {
+    if (isDragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const geoPos = screenToGeo(mouseX, mouseY);
+    if (geoPos) {
+      document.getElementById("canvasCoordsText").innerText = 
+        `Lat: ${geoPos.lat.toFixed(4)}, Lng: ${geoPos.lng.toFixed(4)}`;
+    }
+
+    // Hit test tile
+    let hit = null;
+    if (geoPos && mapTiles.length > 0) {
+      const catFilter = document.getElementById("mapCategorySelect").value;
+      const statusFilter = document.getElementById("mapStatusSelect").value;
+
+      // Reverse order to pick top-most / highest depth tiles first
+      for (let i = mapTiles.length - 1; i >= 0; i--) {
+        const t = mapTiles[i];
+        if (catFilter !== "all" && t.category !== catFilter) continue;
+        if (statusFilter !== "all" && t.status !== statusFilter) continue;
+        
+        if (geoPos.lat >= t.min_lat && geoPos.lat <= t.max_lat &&
+            geoPos.lng >= t.min_lng && geoPos.lng <= t.max_lng) {
+          hit = t;
+          break;
+        }
+      }
+    }
+
+    if (hit !== hoveredTile) {
+      hoveredTile = hit;
+      if (hoveredTile) {
+        updateInspector(hoveredTile);
+      }
+      renderTileCanvas();
+    }
+  });
+
+  canvas.addEventListener("click", () => {
+    if (hoveredTile) {
+      selectedTile = hoveredTile;
+      updateInspector(selectedTile);
+      renderTileCanvas();
+    }
+  });
+}
+
+function zoomTileCanvas(factor, centerX, centerY) {
+  const canvas = document.getElementById("tileMapCanvas");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = centerX !== undefined ? centerX : rect.width / 2;
+  const cy = centerY !== undefined ? centerY : rect.height / 2;
+
+  const newZoom = Math.max(0.2, Math.min(canvasZoom * factor, 30.0));
+  canvasPan.x = cx - (cx - canvasPan.x) * (newZoom / canvasZoom);
+  canvasPan.y = cy - (cy - canvasPan.y) * (newZoom / canvasZoom);
+  canvasZoom = newZoom;
+  renderTileCanvas();
+}
+
+function resetTileCanvasView() {
+  canvasPan = { x: 0, y: 0 };
+  canvasZoom = 1.0;
+  renderTileCanvas();
+}
+
+function getActiveGeoBounds() {
+  if (territoryBounds) {
+    return territoryBounds;
+  }
+  if (mapTiles && mapTiles.length > 0) {
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    mapTiles.forEach(t => {
+      if (t.min_lat < minLat) minLat = t.min_lat;
+      if (t.max_lat > maxLat) maxLat = t.max_lat;
+      if (t.min_lng < minLng) minLng = t.min_lng;
+      if (t.max_lng > maxLng) maxLng = t.max_lng;
+    });
+    return { min_lat: minLat, max_lat: maxLat, min_lng: minLng, max_lng: maxLng };
+  }
+  return { min_lat: 24.0, max_lat: 50.0, min_lng: -125.0, max_lng: -66.0 };
+}
+
+function geoToScreen(lng, lat) {
+  const canvas = document.getElementById("tileMapCanvas");
+  if (!canvas) return { x: 0, y: 0 };
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+  const b = getActiveGeoBounds();
+
+  const latSpan = Math.max(0.001, b.max_lat - b.min_lat);
+  const lngSpan = Math.max(0.001, b.max_lng - b.min_lng);
+
+  const pad = 36;
+  const availW = w - pad * 2;
+  const availH = h - pad * 2;
+
+  // Aspect-preserving scaling
+  const scaleX = availW / lngSpan;
+  const scaleY = availH / latSpan;
+  const baseScale = Math.min(scaleX, scaleY);
+
+  const offsetX = pad + (availW - lngSpan * baseScale) / 2;
+  const offsetY = pad + (availH - latSpan * baseScale) / 2;
+
+  const rawX = offsetX + (lng - b.min_lng) * baseScale;
+  const rawY = offsetY + (b.max_lat - lat) * baseScale;
+
+  return {
+    x: rawX * canvasZoom + canvasPan.x,
+    y: rawY * canvasZoom + canvasPan.y
+  };
+}
+
+function screenToGeo(screenX, screenY) {
+  const canvas = document.getElementById("tileMapCanvas");
+  if (!canvas) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+  const b = getActiveGeoBounds();
+
+  const latSpan = Math.max(0.001, b.max_lat - b.min_lat);
+  const lngSpan = Math.max(0.001, b.max_lng - b.min_lng);
+
+  const pad = 36;
+  const availW = w - pad * 2;
+  const availH = h - pad * 2;
+  const baseScale = Math.min(availW / lngSpan, availH / latSpan);
+
+  const offsetX = pad + (availW - lngSpan * baseScale) / 2;
+  const offsetY = pad + (availH - latSpan * baseScale) / 2;
+
+  const unscaledX = (screenX - canvasPan.x) / canvasZoom;
+  const unscaledY = (screenY - canvasPan.y) / canvasZoom;
+
+  const lng = b.min_lng + (unscaledX - offsetX) / baseScale;
+  const lat = b.max_lat - (unscaledY - offsetY) / baseScale;
+
+  return { lat, lng };
+}
+
+function renderTileCanvas() {
+  const canvas = document.getElementById("tileMapCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  ctx.fillStyle = "#090d16";
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle coordinate grid
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+  ctx.lineWidth = 1;
+  const b = getActiveGeoBounds();
+  const latStep = (b.max_lat - b.min_lat) > 10 ? 2 : 1;
+  const lngStep = (b.max_lng - b.min_lng) > 10 ? 2 : 1;
+
+  for (let lat = Math.floor(b.min_lat); lat <= Math.ceil(b.max_lat); lat += latStep) {
+    const p1 = geoToScreen(b.min_lng, lat);
+    const p2 = geoToScreen(b.max_lng, lat);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+  for (let lng = Math.floor(b.min_lng); lng <= Math.ceil(b.max_lng); lng += lngStep) {
+    const p1 = geoToScreen(lng, b.min_lat);
+    const p2 = geoToScreen(lng, b.max_lat);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+
+  // Draw Tiles
+  const catFilter = document.getElementById("mapCategorySelect").value;
+  const statusFilter = document.getElementById("mapStatusSelect").value;
+
+  const statusColors = {
+    completed: { fill: "rgba(16, 185, 129, 0.35)", stroke: "#10b981" },
+    running: { fill: "rgba(56, 189, 248, 0.45)", stroke: "#38bdf8" },
+    subdivided: { fill: "rgba(129, 140, 248, 0.2)", stroke: "#818cf8" },
+    retry_pending: { fill: "rgba(245, 158, 11, 0.35)", stroke: "#f59e0b" },
+    failed: { fill: "rgba(244, 63, 94, 0.4)", stroke: "#f43f5e" },
+    limit_reached: { fill: "rgba(251, 146, 60, 0.35)", stroke: "#fb923c" },
+    pending: { fill: "rgba(100, 116, 139, 0.15)", stroke: "#475569" },
+  };
+
+  // Sort tiles by depth so subdivided parents draw underneath children
+  const sortedTiles = [...mapTiles].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+
+  sortedTiles.forEach(t => {
+    if (catFilter !== "all" && t.category !== catFilter) return;
+    if (statusFilter !== "all" && t.status !== statusFilter) return;
+
+    const pNW = geoToScreen(t.min_lng, t.max_lat);
+    const pSE = geoToScreen(t.max_lng, t.min_lat);
+
+    const tileW = Math.max(2, pSE.x - pNW.x);
+    const tileH = Math.max(2, pSE.y - pNW.y);
+
+    const c = statusColors[t.status] || statusColors.pending;
+    ctx.fillStyle = c.fill;
+    ctx.fillRect(pNW.x, pNW.y, tileW, tileH);
+
+    ctx.strokeStyle = c.stroke;
+    ctx.lineWidth = t.depth > 0 ? 1 : 1.5;
+    if (t.status === "subdivided") {
+      ctx.setLineDash([3, 3]);
+    } else {
+      ctx.setLineDash([]);
+    }
+    ctx.strokeRect(pNW.x, pNW.y, tileW, tileH);
+    ctx.setLineDash([]);
+
+    // Highlight hovered or selected tile
+    if (hoveredTile && hoveredTile.tile_id === t.tile_id) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(pNW.x, pNW.y, tileW, tileH);
+    }
+  });
+
+  ctx.restore();
+}
+
+function updateInspector(tile) {
+  if (!tile) return;
+  document.getElementById("inspStatusBadge").innerText = (tile.status || "UNKNOWN").toUpperCase();
+  const st = tile.status || "pending";
+  const badge = document.getElementById("inspStatusBadge");
+  if (st === "completed") {
+    badge.style.background = "rgba(16,185,129,0.2)";
+    badge.style.color = "#10b981";
+  } else if (st === "running") {
+    badge.style.background = "rgba(56,189,248,0.2)";
+    badge.style.color = "#38bdf8";
+  } else if (st === "failed") {
+    badge.style.background = "rgba(244,63,94,0.2)";
+    badge.style.color = "var(--accent-rose)";
+  } else if (st === "retry_pending") {
+    badge.style.background = "rgba(245,158,11,0.2)";
+    badge.style.color = "#f59e0b";
+  } else {
+    badge.style.background = "rgba(100,116,139,0.2)";
+    badge.style.color = "var(--text-muted)";
+  }
+
+  document.getElementById("inspTileId").innerText = tile.tile_id;
+  document.getElementById("inspParentId").innerText = tile.parent_tile_id || "None (Root)";
+  document.getElementById("inspCategory").innerText = tile.category || "-";
+  document.getElementById("inspDepth").innerText = tile.depth !== undefined ? tile.depth : 0;
+
+  const latSpan = (tile.max_lat - tile.min_lat).toFixed(4);
+  const lngSpan = (tile.max_lng - tile.min_lng).toFixed(4);
+  document.getElementById("inspSpan").innerText = `${latSpan}° × ${lngSpan}°`;
+
+  document.getElementById("inspBounds").innerHTML = `
+    Lat: ${tile.min_lat?.toFixed(4)} to ${tile.max_lat?.toFixed(4)}<br>
+    Lng: ${tile.min_lng?.toFixed(4)} to ${tile.max_lng?.toFixed(4)}
+  `;
+
+  document.getElementById("inspResults").innerText = tile.results_count || 0;
+  document.getElementById("inspNewRecords").innerText = tile.new_records_count || 0;
+  document.getElementById("inspDups").innerText = tile.duplicate_cids_count || 0;
+  document.getElementById("inspAttempts").innerText = `${tile.attempts_count || 0} (retries: ${tile.retry_count || 0})`;
+
+  const errBox = document.getElementById("inspErrorBox");
+  if (tile.last_error) {
+    errBox.style.display = "block";
+    document.getElementById("inspErrorText").innerText = tile.last_error;
+  } else {
+    errBox.style.display = "none";
+  }
+
+  document.getElementById("inspUpdatedAt").innerText = tile.updated_at ? new Date(tile.updated_at).toLocaleTimeString() : "-";
+}
+
+// --------------------------------------------------------------------------
+// State-Wise Exports Implementation (Section 6 & 7)
+// --------------------------------------------------------------------------
+async function fetchStateExports() {
+  const tbody = document.getElementById("stateExportsTableBody");
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">Refreshing exports...</td></tr>';
+
+  const res = await safeApiRequest("/api/pipeline/exports");
+  if (!res.ok) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-rose);padding:18px;">Error loading exports: ${escapeHtml(res.error)}</td></tr>`;
+    return;
+  }
+
+  const exportsList = res.data?.exports || [];
+  if (exportsList.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">No state-wise exports generated yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = "";
+  exportsList.forEach(exp => {
+    const tr = document.createElement("tr");
+    const isFull = exp.completeness_status === "fully_completed";
+    const isPartial = exp.completeness_status === "partially_completed";
+    const stBadge = isFull 
+      ? '<span class="badge" style="background:rgba(16,185,129,0.15);color:var(--accent-green);font-size:10.5px;">✓ COMPLETE</span>'
+      : (isPartial 
+        ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;font-size:10.5px;">⚠ PARTIAL</span>'
+        : '<span class="badge" style="background:rgba(244,63,94,0.15);color:var(--accent-rose);font-size:10.5px;">✕ INCOMPLETE</span>');
+
+    const downloadCsvUrl = `/api/pipeline/exports/download?path=${encodeURIComponent(exp.all_businesses_csv)}`;
+    const downloadSummaryUrl = `/api/pipeline/exports/download?path=${encodeURIComponent(exp.run_summary_json)}`;
+
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);color:var(--accent-cyan);">${escapeHtml(exp.run_date || '-')}</td>
+      <td><span class="badge" style="background:rgba(56,189,248,0.1);color:var(--accent-cyan);font-size:10px;">${escapeHtml(exp.country || '-')}</span></td>
+      <td><strong>${escapeHtml(exp.folder_name || '-')}</strong></td>
+      <td style="font-weight:700;color:var(--text-primary);">${exp.total_businesses || 0}</td>
+      <td>${(exp.categories || []).map(c => `<span class="badge" style="background:var(--bg-secondary);margin:1px;font-size:10px;">${escapeHtml(c)}</span>`).join(' ')}</td>
+      <td>${stBadge}</td>
+      <td>
+        <div style="display:flex;gap:6px;">
+          <a class="btn btn-secondary btn-sm" href="${downloadCsvUrl}" download style="padding:2px 8px;font-size:11px;text-decoration:none;">📄 CSV</a>
+          <a class="btn btn-secondary btn-sm" href="${downloadSummaryUrl}" download style="padding:2px 8px;font-size:11px;text-decoration:none;">📋 Summary</a>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// --------------------------------------------------------------------------
+// Initialization Hookup
+// --------------------------------------------------------------------------
+const originalDOMContentLoaded = document.addEventListener;
+document.addEventListener("DOMContentLoaded", () => {
+  populateTerritorySelector();
+  initTileMap();
+  loadTerritoryTiles(true);
+  fetchStateExports();
+});
+</script>
+{% endblock %}
+
